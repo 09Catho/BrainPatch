@@ -331,9 +331,25 @@ whenever the schedule was off. Now every pass is recorded as
 
 Volume: 6080.24 MB total (5938.53 MB of it the Hugging Face cache).
 
-**Modal billing was not read back programmatically**, so no spend figure is
-claimed as measured. Based on published L4 pricing and the runtimes above, the
-GPU cost is on the order of a few tens of US cents. Treat that as an estimate.
+**Actual spend, read from `modal billing summary`:**
+
+```
+Metered Cost:      0.11
+  Ephemeral Apps:  0.10
+  Volumes:         0.01
+Credits:          -0.10
+Free Storage:     -0.01
+Billed Cost:      $0.00
+```
+
+**$0.11 metered** for the entire project — infrastructure, all GPU work,
+`smoke_v0` end to end, and both Hugging Face uploads. That is 1.1% of the $10
+budget, and it landed at $0.00 billed after credits.
+
+What kept it there: CPU containers for the model download, feature analysis and
+publishing; `retries=0` so no failed GPU job ever silently ran twice; a
+2,000-token `tiny_v0` extraction to catch bugs before the real run; a 60-second
+scaledown window; and no deployed demo.
 
 ---
 

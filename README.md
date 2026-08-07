@@ -457,6 +457,22 @@ A one-item change on ten probes carries no statistical weight. It is directional
 | `experiments/` | 0.09 MB |
 | **total** | **6080.24 MB** |
 
+### Compute cost
+
+Read from `modal billing summary`, not estimated:
+
+| | |
+|---|---|
+| Metered cost | **$0.11** ($0.10 compute, $0.01 volumes) |
+| Billed after credits | **$0.00** |
+
+That covers every GPU run in this README plus both Hugging Face uploads — about
+1.1% of the $10 project budget. Cost control was structural rather than
+incidental: CPU containers for the model download, feature analysis and
+publishing; `retries=0` so a failed GPU job never silently reran; a 2,000-token
+extraction to catch bugs before the real one; a 60-second scaledown window; and
+no deployed demo.
+
 ---
 
 ## Demo
