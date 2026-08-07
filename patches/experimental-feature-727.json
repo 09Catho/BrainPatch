@@ -1,7 +1,7 @@
 {
   "authors": [],
   "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
-  "description": "Single-feature steering direction from the smoke_v0 SAE. This patch is named after its feature ID because nothing about its behaviour has been established. Steering it at strength 16 does change the model's output (mean 3-gram divergence 0.71 from baseline over 6 prompts), but a SCALE-MATCHED RANDOM DIRECTION of identical L2 norm changed the output MORE (0.85), and an unrelated real feature changed it about the same (0.68). There is therefore no evidence that this direction carries any specific behavioural meaning. Published as a reproducible artifact of the smoke_v0 pipeline, not as a working behavioural patch.",
+  "description": "Single-feature steering direction from the smoke_v0 SAE. This patch is named after its feature ID because nothing about its behaviour has been established. Steering it at strength 16 does change the model's output (mean 3-gram divergence 0.71 from baseline over 6 prompts), but a SCALE-MATCHED RANDOM DIRECTION of identical L2 norm changed the output MORE (0.85). There is no evidence that this direction carries any specific behavioural meaning. NOTE ALSO that feature 727 is a pathological selection: it fires on only 5 of 20,000 tokens with an activation 158x the dictionary median, and belongs to a cluster of 32 near-duplicate features that all fire on the same rare token. Published as a reproducible artifact of the smoke_v0 pipeline, not as a working behavioural patch.",
   "evaluation": {
     "experiment": "smoke_v0_intervention",
     "num_prompts": 6,
@@ -17,7 +17,19 @@
     },
     "effect_vs_controls": {
       "positive_minus_random": -0.13710412966180374,
-      "positive_minus_unrelated": 0.028984242987212805
+      "positive_minus_unrelated": 0.028984242987212805,
+      "unrelated_control_retracted": "INVALID. Feature 1270 was selected by the same max_activation ranking as the target and is a near-duplicate of it: 3 fires out of 20,000 tokens, max activation 1385.8, same top token ' Bd', same 32-feature outlier cluster. It is not an unrelated feature and this comparison is uninformative. The random-direction control is unaffected and remains valid.",
+      "valid_controls": ["zero", "random_positive", "random_negative"]
+    },
+    "feature_selection_flaw": {
+      "target_fire_count": 5,
+      "target_firing_rate": 0.00025,
+      "target_max_activation": 1429.7736816406250,
+      "dictionary_median_fire_count": 271,
+      "dictionary_median_max_activation": 9.06184,
+      "outlier_cluster_size": 32,
+      "outlier_cluster_shared_top_token": " Bd",
+      "note": "Ranking by max_activation selected the single most extreme outlier in the dictionary. An undertrained SAE shatters rare high-norm tokens across many near-duplicate features; this ranking finds exactly those. Use min_firing_rate or rank by mean_activation instead."
     },
     "zero_strength_matches_baseline": "6/6 prompts byte-identical",
     "utility_probes": {
@@ -27,7 +39,7 @@
       "n_probes": 10,
       "note": "10 hand-written probes; a 1-item change carries no statistical weight"
     },
-    "conclusion": "NEGATIVE. Controls do not support a feature-specific causal effect. The infrastructure is verified; the behavioural claim is not.",
+    "conclusion": "NEGATIVE. The scale-matched random-direction control diverged MORE than the intervention, so there is no support for a feature-specific causal effect. The infrastructure is verified; the behavioural claim is not. A specific, fixable cause was identified after publication: the max_activation selection rule picked a degenerate outlier feature (see feature_selection_flaw), so this result says more about the selection rule than about SAE features in general.",
     "statistical_caveat": "6 prompts, single greedy generation per condition, no repeated sampling. These differences have no significance testing behind them and should not be read as effect sizes."
   },
   "evidence_level": "none",

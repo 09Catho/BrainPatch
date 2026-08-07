@@ -241,6 +241,7 @@ def rank_features(
     limit: int = 50,
     min_fire_count: int = 1,
     max_firing_rate: float = 1.0,
+    min_firing_rate: float = 0.0,
 ) -> list[FeatureRecord]:
     """Rank features from the persisted database.
 
@@ -251,8 +252,29 @@ def rank_features(
     max_firing_rate:
         Drop features that fire on more than this fraction of tokens. Very
         high-frequency features are usually modelling something positional or
-        distributional rather than anything specific, and they make poor
-        intervention candidates.
+        distributional rather than anything specific.
+    min_firing_rate:
+        Drop features that fire on *fewer* than this fraction of tokens. See the
+        warning below -- this is the guard that matters in practice.
+
+    Warning
+    -------
+    **Ranking by ``max_activation`` alone selects outliers, and did so
+    destructively in ``smoke_v0``.** Measured on that feature database: the top
+    32 features by ``max_activation`` all fired on 3-6 tokens out of 20,000, all
+    with the same top token (``" Bd"``, chess notation from a handful of
+    wikitext articles), at activations 100x+ the dictionary median of 9.06. An
+    undertrained SAE shatters rare high-norm tokens across many near-duplicate
+    features, and this ranking finds precisely those.
+
+    The consequence in ``smoke_v0`` was worse than a poor choice of target: the
+    "unrelated feature" control was drawn from the same ranking and landed on
+    feature 1270, a near-duplicate of the target firing on the same token. That
+    control was therefore not unrelated and its comparison is uninformative.
+
+    For intervention candidates, pass ``min_firing_rate`` at or near the
+    dictionary median firing rate, or rank by ``mean_activation`` /
+    ``fire_count`` instead.
     """
     path = Path(paths.features_jsonl(experiment))
     if not path.is_file():
@@ -268,6 +290,8 @@ def rank_features(
             if record.stats.fire_count < min_fire_count:
                 continue
             if record.stats.firing_rate > max_firing_rate:
+                continue
+            if record.stats.firing_rate < min_firing_rate:
                 continue
             records.append(record)
 

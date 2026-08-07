@@ -37,10 +37,11 @@ extraction:
   batch_size: 8
   shard_size: 100000
   store_dtype: bfloat16
-  # Position 0 is an attention sink: its measured activation norm at layer 18 is
-  # ~11052 against a corpus mean of ~70, a factor of 156. Including it would
-  # dominate the input-scale normalisation and waste dictionary capacity on a
-  # single positional artifact.
+  # Position 0 exhibited an extreme residual-stream activation outlier: measured
+  # norm ~11052 at layer 18 against a corpus mean of ~70, a factor of 156.
+  # Including it would dominate the input-scale normalisation and spend
+  # dictionary capacity on a single positional artifact. (Commonly attributed to
+  # attention-sink behaviour; no attention weights were measured here.)
   skip_first_n_tokens: 1
   seed: 0
 

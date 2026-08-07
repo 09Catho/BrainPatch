@@ -180,7 +180,9 @@ def compare_utility(baseline: UtilityReport, patched: UtilityReport) -> dict[str
             else None
         ),
         "note": (
-            f"{baseline.total} hand-written probes. A drop indicates the intervention "
-            "damaged unrelated capability; the absolute score is not a benchmark result."
+            f"{baseline.total} hand-written probes. A drop is a signal worth "
+            "investigating, not evidence of degradation: at this sample size a "
+            "one-item change carries no statistical weight. The absolute score is "
+            "not a benchmark result."
         ),
     }

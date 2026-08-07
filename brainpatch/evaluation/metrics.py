@@ -1,9 +1,10 @@
 """Model-free text metrics for detecting intervention side effects.
 
-Steering a residual stream can wreck a model's fluency long before it changes
-the behaviour you were aiming at. These metrics are the cheap tripwires: they
-catch degeneration (loops, single-token spam, truncation) without needing a
-judge model or a paid API.
+A large enough residual-stream perturbation degrades a model's fluency, and it
+can do so before it changes the behaviour you were aiming at -- observed here at
+steering strength 32, where the model looped. These metrics are the cheap
+tripwires: they catch degeneration (loops, single-token spam, truncation)
+without needing a judge model or a paid API.
 
 They are *not* measures of quality. A high `distinct_2` does not mean the answer
 is good; a low one strongly suggests the answer is broken. Use them to reject

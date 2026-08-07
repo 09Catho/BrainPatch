@@ -23,10 +23,14 @@ in ``examples.jsonl``. Recovering the context for a high-activating token is a
 lookup, not a scan.
 
 The first ``skip_first_n_tokens`` positions of each block are dropped by
-default. Position 0 in a decoder-only transformer is an attention sink with an
-activation norm often an order of magnitude above every other token; including
-it distorts the input normalization and wastes dictionary capacity on a single
-positional artifact.
+default. Position 0 was measured to carry an extreme residual-stream activation
+outlier -- norm 11052 against a corpus mean of ~70 at layer 18 of
+Qwen2.5-1.5B-Instruct, a factor of 156. Including it distorts the input
+normalization and spends dictionary capacity on a single positional artifact.
+
+Outliers at the first token are commonly attributed to attention-sink
+behaviour. That is plausible here but unverified: no attention weights were
+measured, so the docstring records the outlier, not a mechanism.
 """
 
 from __future__ import annotations
@@ -56,7 +60,7 @@ class ExtractionConfig:
     target_tokens: int = 20_000
     shard_size: int = 100_000
     batch_size: int = 8
-    #: Drop this many leading positions per block (attention-sink artifact).
+    #: Drop this many leading positions per block (measured position-0 outlier).
     skip_first_n_tokens: int = 1
     #: Storage dtype. bfloat16 is lossless relative to a bf16 forward pass and
     #: halves the corpus size versus float32.

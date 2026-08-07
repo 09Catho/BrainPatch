@@ -4,6 +4,11 @@ Every workflow is reachable as::
 
     modal run modal_app/app.py::<function>
 
+with one deliberate exception: :func:`~modal_app.publish.sync_patches` takes a
+``dict[str, str]`` payload, which the Modal CLI cannot express as a command-line
+flag. It is called programmatically from :func:`publish_release` and is not a
+CLI target. Everything else in ``__all__`` accepts ``--help`` and runs directly.
+
 The individual modules also work as entry points (``modal run
 modal_app/extraction.py::extract_activations``); this module just gathers them
 so there is one place to look.
@@ -26,13 +31,11 @@ from modal_app.intervention import (
     intervention_experiment,
     intervention_smoke,
     sweep_strength,
+    verify_model_card_example,
 )
 from modal_app.model_cache import cache_model, model_architecture, verify_cached_model
-from modal_app.publish import (
-    publish_dataset_to_huggingface,
-    publish_to_huggingface,
-    sync_patches,
-)
+from modal_app.dataset_release import build_dataset_tables, publish_dataset_release
+from modal_app.publish import publish_to_huggingface, sync_patches
 from modal_app.resources import app
 from modal_app.training import train_sae
 from modal_app.web import serve_demo
@@ -40,6 +43,7 @@ from modal_app.web import serve_demo
 __all__ = [
     "analyze_features",
     "app",
+    "build_dataset_tables",
     "cache_model",
     "cpu_smoke",
     "dynamic_steering_demo",
@@ -48,7 +52,7 @@ __all__ = [
     "intervention_experiment",
     "intervention_smoke",
     "model_architecture",
-    "publish_dataset_to_huggingface",
+    "publish_dataset_release",
     "publish_release",
     "publish_to_huggingface",
     "serve_demo",
@@ -58,6 +62,7 @@ __all__ = [
     "top_features",
     "train_sae",
     "verify_cached_model",
+    "verify_model_card_example",
     "volume_report",
 ]
 
@@ -113,114 +118,23 @@ def publish_release(
 
     dataset_result = None
     if with_dataset:
-        card = _dataset_card(experiment)
+        card_path = repo_root / "docs" / "dataset_card.md"
+        if not card_path.is_file():
+            raise SystemExit(f"dataset card not found at {card_path}")
+
+        print("[publish] building Parquet tables for the dataset viewer")
+        build_dataset_tables.remote(experiment)
+
         print(f"[publish] dataset repository (dry_run={dry_run})")
-        dataset_result = publish_dataset_to_huggingface.remote(
+        dataset_result = publish_dataset_release.remote(
             experiment=experiment,
             repo_id=dataset_repo_id or None,
             dry_run=dry_run,
-            dataset_card=card,
+            dataset_card=card_path.read_text(encoding="utf-8"),
         )
 
     print("\n===== publication summary =====")
     print(json.dumps({"model": model_result, "dataset": dataset_result}, indent=2, default=str))
-
-
-def _dataset_card(experiment: str) -> str:
-    """Card for the feature-database dataset repository."""
-    return f"""---
-license: apache-2.0
-tags:
-  - mechanistic-interpretability
-  - sparse-autoencoder
-  - interpretability
----
-
-# BrainPatch feature database — Qwen2.5-1.5B-Instruct
-
-Per-feature statistics for a Top-K sparse autoencoder trained on layer 18
-(`residual_post`) of a frozen `Qwen/Qwen2.5-1.5B-Instruct`
-(revision `989aa7980e4cf806f80c7fef2b1adb7bc71aa306`).
-
-GitHub: **https://github.com/09Catho/BrainPatch**
-
-## Contents
-
-| File | What |
-|---|---|
-| `{experiment}/features.jsonl` | One record per feature: statistics and top-activating contexts |
-| `{experiment}/summary.json` | Aggregate dictionary statistics |
-| `{experiment}/activation_manifest.json` | Corpus provenance (metadata only) |
-
-## Record schema
-
-```json
-{{
-  "feature_id": 727,
-  "stats": {{
-    "fire_count": 0, "total_tokens": 20000,
-    "mean_activation": 0.0, "max_activation": 0.0,
-    "std_activation": 0.0, "decoder_norm": 1.0,
-    "firing_rate": 0.0, "is_dead": false
-  }},
-  "top_contexts": [
-    {{"example_index": 0, "token_position": 0, "token_id": 0,
-      "token_text": "", "activation": 0.0,
-      "context_before": "", "context_after": ""}}
-  ],
-  "hypothesis": null,
-  "evidence_level": "none",
-  "evidence_refs": []
-}}
-```
-
-`mean_activation` and `std_activation` are computed over **firing tokens only**.
-Averaging in a Top-K SAE's structural zeros would report `k/d_sae` times the
-true magnitude.
-
-## Dictionary statistics
-
-| | |
-|---|---|
-| Features | 2048 (d_in 1536, expansion 1.33×) |
-| Top-K | 32 (measured L0 exactly 32.0) |
-| Tokens analysed | 20,000 |
-| Alive / dead | 2048 / 0 |
-| Mean firing rate (alive) | 0.015625 |
-| Median firing rate (alive) | 0.01355 |
-| Max firing rate | 0.0766 |
-| Decoder norms | mean 1.0, min 0.9999992, max 1.0000007 |
-| `input_scale` | 0.5610531069008018 |
-
-## Scientific status
-
-**Every `hypothesis` field is `null` and every `evidence_level` is `none`.**
-
-Top-activating contexts are *correlational* evidence. A feature whose top
-examples look thematically coherent is a feature that correlates with that theme
-in this corpus — it is not "the X feature" until steering it changes behaviour
-and scale-matched controls do not.
-
-In the accompanying intervention experiment the controls **failed**: a
-scale-matched random direction moved the model's output further from baseline
-(0.847) than the tested feature direction did (0.710). Treat these statistics as
-descriptive only.
-
-The SAE is also deliberately undertrained (20k activations, train explained
-variance 0.762 vs validation 0.658). See the research log on GitHub.
-
-## Corpus and licensing
-
-Statistics are derived from
-[`Salesforce/wikitext`](https://huggingface.co/datasets/Salesforce/wikitext)
-(`wikitext-2-raw-v1`, train split), CC BY-SA 3.0, derived from Wikipedia.
-
-The corpus is **not** redistributed here. `top_contexts` carry short attributed
-snippets (a few tokens either side of the activating token) for human
-inspection; everything else is derived numerical metadata.
-
-This repository: Apache-2.0.
-"""
 
 
 @app.local_entrypoint()

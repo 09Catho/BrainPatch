@@ -109,6 +109,90 @@ def intervention_smoke(
     return result
 
 
+@app.function(**gpu_kwargs(timeout=60 * 30, secrets=True))
+def verify_model_card_example(
+    repo_id: str = "09Catho/BrainPatch-Qwen2.5-1.5B",
+    prompt: str = "Solve this problem: what is 17 + 25?",
+    strength_multiplier: float = 1.0,
+) -> dict[str, Any]:
+    """Execute the published model-card quickstart verbatim, from the Hub.
+
+    A documented example that has never been run is a liability, not
+    documentation. This function is the *only* place in the codebase that loads
+    a patch and an SAE from the Hugging Face Hub rather than from the Volume,
+    which is precisely what a new user's first run does.
+
+    Deliberately does **not** touch ``/vol`` for the artifacts, so a broken or
+    missing upload fails here rather than silently passing against local state.
+    """
+    from huggingface_hub import hf_hub_download
+
+    from brainpatch import BrainPatchedModel
+
+    # --- the published snippet, unmodified ------------------------------------
+    checkpoint_path = hf_hub_download(repo_id, "sae/smoke_v0/sae_latest.pt")
+    patch_path = hf_hub_download(repo_id, "patches/experimental-feature-727.json")
+
+    model = BrainPatchedModel.from_pretrained(
+        "Qwen/Qwen2.5-1.5B-Instruct",
+        revision="989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+    )
+    model.load_sae(checkpoint_path, reference="smoke_v0")
+
+    model.install(patch_path)
+    model.set_patch_strength("experimental-feature-727", strength_multiplier)
+
+    generated = model.generate(prompt)
+    # --- end of published snippet ---------------------------------------------
+
+    stats = model.last_steering_stats
+    # set_patch_strength multiplies the patch's declared strength rather than
+    # replacing it, so the effective coefficient is the product. Recorded here
+    # because getting this wrong is how the documented example first shipped a
+    # ~34% perturbation and a wrong arithmetic answer.
+    patch_strength = model.plan.patches["experimental-feature-727"].spec.features[0].strength
+    effective = patch_strength * strength_multiplier
+
+    # The snippet's closing claim: strength 0 recovers baseline exactly.
+    model.set_patch_strength("experimental-feature-727", 0.0)
+    zeroed = model.generate(prompt)
+    model.plan.patches = {}
+    baseline = model.generate(prompt)
+
+    # And the ad-hoc path documented just below it.
+    model.add_feature(layer=18, feature_id=727, strength=16.0, name="adhoc-check")
+    adhoc = model.generate(prompt)
+    model.plan.patches = {}
+
+    result = {
+        "ok": True,
+        "repo_id": repo_id,
+        "checkpoint_downloaded": checkpoint_path,
+        "patch_downloaded": patch_path,
+        "installed_patches": ["experimental-feature-727"],
+        "strength_multiplier": strength_multiplier,
+        "patch_declared_strength": patch_strength,
+        "effective_strength": effective,
+        "generated": generated,
+        "steering_applied": stats.get("applied_passes", 0) > 0,
+        "mean_delta_norm": stats.get("mean_delta_norm"),
+        "baseline": baseline,
+        "zero_strength_matches_baseline": zeroed == baseline,
+        "adhoc_add_feature_works": adhoc != baseline,
+        "patch_changed_output": generated != baseline,
+    }
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    failures = [
+        key
+        for key in ("steering_applied", "zero_strength_matches_baseline", "adhoc_add_feature_works")
+        if not result[key]
+    ]
+    if failures:
+        raise RuntimeError(f"model-card example failed these checks: {failures}")
+    return result
+
+
 @app.function(**gpu_kwargs(timeout=60 * 30))
 def sweep_strength(
     experiment: str = "smoke_v0",

@@ -53,7 +53,7 @@ delta_raw = strength × unit_decoder_column / input_scale
 - Not evidence that SAE features correspond to human concepts.
 - Not a claim that steering demonstrates beliefs, intentions, or any mental property.
 - Not a source of validated behavioural labels. Every feature description is a hypothesis and is marked as one.
-- Not free of side effects. Capability probes dropped from 9/10 to 8/10 at the strength used.
+- Not free of side effects. Interventions **may** affect unrelated capabilities; the smoke test observed 9/10 vs 8/10 on ten hand-written probes, but that sample is far too small to establish degradation.
 - Not portable to other models, layers, or SAEs. The format refuses mismatched application.
 
 ---
@@ -78,27 +78,64 @@ Raw activation shards are not published: 58.8 MB derived from a CC BY-SA corpus,
 
 ## Usage
 
+Requires a CUDA GPU, `torch`, `transformers`, and the `brainpatch` package:
+
+```bash
+pip install torch transformers "brainpatch @ git+https://github.com/09Catho/BrainPatch.git"
+```
+
+This snippet is **copy-paste runnable from a clean environment**. Both the SAE
+checkpoint *and* the patch file are fetched from this repository — nothing is
+assumed to exist on disk. It is verified end to end in a fresh Modal container
+by `modal run modal_app/app.py::verify_model_card_example`.
+
 ```python
 from huggingface_hub import hf_hub_download
+
 from brainpatch import BrainPatchedModel
 
-checkpoint = hf_hub_download(
-    "09Catho/BrainPatch-Qwen2.5-1.5B", "sae/smoke_v0/sae_latest.pt"
-)
+REPO = "09Catho/BrainPatch-Qwen2.5-1.5B"
+
+# Both artifacts come from the Hub. The patch is a small JSON file; the
+# checkpoint is ~72 MB. The Qwen base weights are downloaded by transformers.
+checkpoint_path = hf_hub_download(REPO, "sae/smoke_v0/sae_latest.pt")
+patch_path = hf_hub_download(REPO, "patches/experimental-feature-727.json")
 
 model = BrainPatchedModel.from_pretrained(
     "Qwen/Qwen2.5-1.5B-Instruct",
     revision="989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
 )
-model.load_sae(checkpoint, reference="smoke_v0")
+model.load_sae(checkpoint_path, reference="smoke_v0")
 
-model.install("patches/experimental-feature-727.json")
-model.set_patch_strength("experimental-feature-727", 1.5)
+# install() validates the patch against the loaded model and SAE, and raises
+# PatchCompatibilityError on any mismatch of model, revision, layer or SAE.
+model.install(patch_path)
 
-print(model.generate("Solve this problem..."))
+# set_patch_strength is a MULTIPLIER on the patch's own strength, not an
+# absolute value. This patch declares strength 16.0, so 1.0 keeps the effective
+# coefficient at 16 — the value the dose-response sweep found changes output
+# while fluency holds. See the warning below before raising it.
+model.set_patch_strength("experimental-feature-727", 1.0)
+
+print(model.generate("Solve this problem: what is 17 + 25?"))
 ```
 
-Ad-hoc single-feature steering:
+`reference="smoke_v0"` must match the patch's `sae.reference` field; that is the
+check which stops feature IDs from one dictionary being applied to another.
+
+> **The multiplier compounds, and the model breaks well before you might expect.**
+> An earlier draft of this example used `1.5`, giving an effective coefficient of
+> 24. Run on Modal, that produced `"17 + 25 = 32"` — a wrong answer, followed by
+> a confused digression about the commutative property of *multiplication* —
+> where the unpatched model correctly answered 42.
+>
+> That is not a bug; it is what a ~34% residual-stream perturbation does to a
+> 1.5B model. The measured sweep is in the dose–response table below: usable
+> around 8–16, looping at 32, collapse at 64. **Treat any strength you have not
+> measured as unsafe**, and check arithmetic and instruction-following whenever
+> you change it.
+
+Ad-hoc single-feature steering, no patch file needed:
 
 ```python
 model.add_feature(layer=18, feature_id=727, strength=16.0)
@@ -109,7 +146,16 @@ Dynamic mid-generation steering, keyed on **generated**-token index:
 ```python
 from brainpatch.steering import StrengthSchedule
 
-model.set_patch_schedule("experimental-feature-727", StrengthSchedule({0: 0.0, 24: 1.0, 48: 2.0}))
+model.set_patch_schedule(
+    "experimental-feature-727", StrengthSchedule({0: 0.0, 24: 1.0, 48: 2.0})
+)
+```
+
+To recover the baseline, either uninstall the patch or set its strength to zero
+— the two are byte-identical by construction:
+
+```python
+model.set_patch_strength("experimental-feature-727", 0.0)
 ```
 
 ---
@@ -151,7 +197,9 @@ All figures below were measured. None are estimates.
 
 20,000 tokens from layer 18 (`residual_post`), sequence length 256, in 8.367 s → **2390.4 tokens/s**, at **3084.01 bytes/token** (= 1536 × 2 bf16 + 12 bytes int32 metadata). Peak VRAM 3553.4 MB.
 
-Position 0 is excluded: its measured activation norm at layer 18 is **11052 against a corpus mean of ~70**, a factor of 156. It is an attention sink, and including it would dominate the input-scale normalisation.
+Position 0 is excluded because it **exhibited an extreme residual-stream activation outlier**: measured norm **11052 against a corpus mean of ~70** at layer 18, a factor of 156. Including it would dominate the input-scale normalisation.
+
+Such first-token outliers are commonly attributed to attention-sink behaviour, which is a plausible explanation here — but **no attention weights were measured**, so the mechanism is not established by these results.
 
 ### SAE training
 
@@ -197,10 +245,36 @@ Feature 727 vs unrelated feature 1270, strength ±16, 6 prompts, greedy decoding
 
 ```
 positive − random_control    = −0.137   ← wrong sign
-positive − unrelated_feature = +0.029   ← negligible
+positive − unrelated_feature = +0.029   ← RETRACTED, see below
 ```
 
 All conditions share an **identical** injected delta norm by construction (decoder columns and random directions are both unit-norm, through the same coefficient path), so magnitude is fully controlled and the comparison is purely about direction.
+
+> **Retraction: the unrelated-feature control was not unrelated.** Feature 1270
+> was drawn from the same `max_activation` ranking as the target and is a
+> near-duplicate — 3 fires in 20,000 tokens, the same top token `" Bd"`, the
+> same outlier cluster. Disregard that comparison. The random-direction control
+> is unaffected and the headline result rests on it.
+
+### The selection rule was the flaw
+
+Inspecting the published feature table shows why this feature was a poor target:
+
+| | feature 727 | dictionary |
+|---|---|---|
+| fire count | **5** / 20,000 | median 271 |
+| max activation | **1429.77** | median 9.06 |
+
+Feature 727 is the dictionary's single most extreme outlier, and the top **32**
+features by `max_activation` all fire on 3–6 tokens sharing the top token
+`" Bd"` (chess notation from a few wikitext articles). An undertrained SAE
+shatters rare high-norm tokens across near-duplicate features; `max_activation`
+ranking finds exactly those.
+
+Read `smoke_v0` as **"this selection rule picks degenerate features"**, not as
+**"SAE directions carry no behavioural meaning"**. Re-running with features near
+the median firing rate needs no new extraction or SAE, and is the top roadmap
+item.
 
 ### Utility retention
 

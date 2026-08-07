@@ -153,7 +153,7 @@ validated against that depth before any extraction ran.
 
 Model load peak VRAM 2945.3 MB; inference peak 2955.2 MB.
 
-### Attention sink confirmed empirically
+### Extreme position-0 activation outlier, measured
 
 The hook smoke test on `"The capital of France is"` reported a mean activation
 norm of 2267 across 5 tokens with the **first token at 11052**. Excluding
@@ -165,6 +165,13 @@ Position 0 is therefore ~156× the typical activation norm. Extraction drops it
 normalisation and spent dictionary capacity on a single positional artifact.
 Two independent measurements agreeing on ~70 is a useful consistency check on
 the whole extraction-and-normalisation path.
+
+**On the mechanism.** An earlier draft of this log called this an "attention
+sink". That was an unearned inference: the literature commonly attributes
+first-token residual outliers to attention-sink behaviour, and it is a plausible
+explanation here, but **no attention weights were measured in this project**.
+What was measured is an activation-norm outlier at position 0. The wording has
+been corrected throughout the repository to say only that.
 
 ### Extraction
 
@@ -257,8 +264,7 @@ positive − unrelated_feature = +0.029
 ```
 
 **A scale-matched random direction moved the output further from baseline than
-the real SAE feature direction did.** An unrelated real feature was
-indistinguishable from the target. All conditions shared an identical delta
+the real SAE feature direction did.** All conditions shared an identical delta
 norm of 28.5178 by construction, so magnitude is fully controlled for and the
 comparison is purely about direction.
 
@@ -267,19 +273,53 @@ behavioural meaning.** What was demonstrated is that *perturbing the residual
 stream at layer 18 with sufficient magnitude changes the output* — which is
 unsurprising and requires no SAE.
 
-### Why this is the expected outcome, and what it does not mean
+> **Retraction (added during the post-release quality pass).** The
+> `unrelated_positive` condition was **not** an unrelated feature. Feature 1270
+> was selected by the same `max_activation` ranking as the target and is a
+> near-duplicate of it. That comparison is uninformative and is retracted; see
+> the root-cause section below. The random-direction control is unaffected and
+> the headline conclusion rests on it.
 
-Most likely explanations, in order of my confidence:
+### Root cause found: the selection rule picked a degenerate cluster
 
-1. **The SAE is undertrained.** 20k activations, measurable overfitting. Its
-   directions may not be meaningfully different from arbitrary ones.
+Found by reading the published feature table, which only became inspectable once
+the dataset viewer was fixed. This supersedes the earlier speculation.
+
+| | feature 727 | feature 1270 (the "control") | dictionary |
+|---|---|---|---|
+| fire count | 5 / 20,000 | 3 / 20,000 | median 271, mean 312.5 |
+| firing rate | 0.00025 | 0.00015 | mean 0.015625 |
+| max activation | 1429.77 | 1385.83 | median 9.06 |
+| top token | `" Bd"` | `" Bd"` | — |
+
+The top **32** features by `max_activation` all fire on 3–6 tokens and all share
+the top token `" Bd"` — chess notation appearing in a handful of wikitext
+articles. An undertrained SAE shatters a few rare, high-norm tokens across many
+near-duplicate features, and `max_activation` ranking finds exactly that cluster.
+
+Two consequences:
+
+1. The intervention target was the dictionary's single most extreme outlier,
+   firing on 0.025% of tokens — about as unrepresentative a direction as the
+   dictionary contains.
+2. The "unrelated feature" control was drawn from the same ranking and landed on
+   a near-duplicate. It was never a control.
+
+So `smoke_v0` is better read as **"this selection rule picks degenerate
+features"** than as **"SAE feature directions carry no behavioural meaning"**.
+The two are very different claims and the earlier write-up conflated them.
+
+`rank_features()` now accepts `min_firing_rate` and carries an explicit warning
+about this failure mode.
+
+### Remaining explanations, re-ranked
+
+1. **The selection rule** — now demonstrated, not speculated. Fixing it requires
+   no new extraction and no new SAE.
 2. **The corpus is wrong for the question.** `wikitext` is generic encyclopedic
-   prose; the base model is instruction-tuned. Features that steer *behaviour*
-   would more plausibly emerge from instruction-formatted data.
-3. **The selection rule was wrong.** Feature 727 was chosen by max activation on
-   the wikitext corpus — nothing about behaviour entered the choice. The
-   contrast-driven search in `patch_search.py` is implemented but was not the
-   rule used here.
+   prose; the base model is instruction-tuned.
+3. **The SAE is undertrained.** 20k activations, measurable overfitting — and
+   the ` Bd` shattering is itself a symptom of exactly that.
 4. **The metric is coarse.** 3-gram divergence measures *that* output changed,
    not *how*. A real behavioural effect could be invisible to it.
 
@@ -294,8 +334,10 @@ evidence of a general negative.
 was in factual QA (2/3 → 1/3); arithmetic, instruction-following and reasoning
 were unchanged. Mean continuation length rose from 57.3 to 69.7 words.
 
-One item on ten probes carries no statistical weight. Directionally consistent
-with steering degrading unrelated capability; nothing stronger is supportable.
+One item on ten probes carries no statistical weight, and **this sample cannot
+establish degradation**. The correct reading is that the intervention *may*
+affect unrelated capabilities and that a properly-powered experiment should
+check; the observed direction is not evidence in itself.
 
 ### Dynamic steering — works, and is verified precisely
 
@@ -353,6 +395,88 @@ scaledown window; and no deployed demo.
 
 ---
 
+---
+
+## Post-release quality pass
+
+Four corrections after the first publication, none requiring new experiments.
+
+### The dataset viewer was broken on arrival
+
+`09Catho/BrainPatch-Features-Qwen2.5-1.5B` returned
+`preview: false, viewer: false` from the datasets-server. The first layout put
+three files with unrelated schemas in one directory:
+
+```
+smoke_v0/features.jsonl            one row per feature
+smoke_v0/summary.json              a single aggregate object
+smoke_v0/activation_manifest.json  corpus provenance
+```
+
+Auto-detection globbed all three into one config and failed to cast them to a
+common schema (`StreamingRowsError` / `CastError`). Published, but unbrowsable.
+
+Restructured into two **flat** Parquet tables — `features` (2048 rows) and
+`contexts` (16,238 rows, joinable on `feature_id`) — with explicit `configs:` in
+the dataset card pinning exactly which files each config reads, so
+auto-detection never runs again. Metadata moved to `metadata/` and the original
+JSONL preserved verbatim at `raw/smoke_v0/features.jsonl`, both outside every
+config glob.
+
+Contexts were deliberately *not* kept as a `list<struct>` column on the feature
+table. Parquet round-trips that fine, but the viewer renders it as opaque JSON
+and it blocks search, filter and statistics. Two flat tables cost one join and
+make both fully browsable.
+
+### The documented quickstart did not run, then ran wrong
+
+The published example downloaded the SAE checkpoint from the Hub and then called
+`model.install("patches/experimental-feature-727.json")` against a **local
+relative path that a new user would not have**. It could never have worked from
+a clean environment.
+
+Fixed to fetch both artifacts via `hf_hub_download`, and added
+`verify_model_card_example` — a Modal function that executes the published
+snippet verbatim in a fresh container, deliberately reading from the Hub rather
+than from `/vol` so a broken upload fails the check.
+
+Running it exposed a second, worse problem. `set_patch_strength` is a
+**multiplier** on the patch's declared strength, not an absolute value. The
+example used `1.5` against a patch declaring `16.0`, giving an effective
+coefficient of **24** — a ~34% residual perturbation. Measured output:
+
+```
+baseline:  "The sum of 17 and 25 is 42."
+patched:   "17 + 25 = 32 ... This is an example of the commutative property
+            of multiplication ..."
+```
+
+A wrong arithmetic answer and a confused digression, shipped as the flagship
+usage example. Corrected to `1.0` (effective 16, delta norm 28.5178), re-verified
+on Modal: answer 42, coherent, `zero_strength_matches_baseline: true`. The
+failure case is now documented in the card as a warning rather than deleted,
+because it is a useful measurement of how little headroom there is.
+
+### Two overclaims in the wording
+
+**"interventions damage unrelated capabilities"** — 9/10 versus 8/10 on ten
+hand-written probes is a one-item difference and cannot establish degradation in
+either direction. Changed throughout to "may affect unrelated capabilities",
+with the sample size stated inline.
+
+**"position 0 is an attention sink"** — the measurement was an activation-norm
+outlier (11052 against a corpus mean of ~70). Attributing it to attention-sink
+behaviour is a mechanism claim, and **no attention weights were measured in this
+project**. Changed throughout to "position 0 exhibited an extreme
+residual-stream activation outlier", with the attention-sink explanation
+mentioned only as a plausible-but-unverified hypothesis.
+
+Both were inferences that ran ahead of the data. Recording them here because the
+same failure mode — a measurement quietly promoted into a mechanism — is exactly
+what the evidence ladder elsewhere in this project exists to prevent.
+
+---
+
 ## Unresolved scientific issues
 
 1. **Does any SAE feature here carry causal behavioural meaning?** Unknown. The
@@ -371,12 +495,21 @@ scaledown window; and no deployed demo.
 
 ## What should be run next
 
-In the order most likely to change the result:
+Re-ordered after the selection-rule root cause was found.
 
-1. Re-extract from an **instruction-formatted corpus** at the same token count.
-   Cheap, and tests the most likely explanation for the null.
-2. Contrast-driven candidate selection instead of max-activation ranking.
+1. **Re-run the intervention experiment on the existing SAE with a sane feature
+   selection** — features near the median firing rate (~271 fires / 20,000), or
+   contrast-driven selection from `patch_search.py`. Requires **no new
+   extraction and no new SAE training**: every artifact already exists on the
+   Volume. Cheapest possible experiment, and it directly tests the leading
+   explanation for the null. Also needs a genuinely unrelated control feature,
+   chosen from a different firing-rate band than the target.
+2. Re-extract from an **instruction-formatted corpus** at the same token count,
+   so features can plausibly relate to behaviour at all.
 3. Log-probability measurement on the contrast fixtures rather than free
-   generation only.
-4. Only then scale to `serious_v1`. Scaling an SAE trained on the wrong
-   distribution mostly buys a better model of the wrong thing.
+   generation only — lower variance per unit of compute.
+4. Statistical power: many prompts, repeated sampling, actual significance
+   testing.
+5. Only then consider `serious_v1`. Scaling an SAE whose features are selected
+   by a broken rule, on the wrong corpus, mostly buys a better model of the
+   wrong thing.

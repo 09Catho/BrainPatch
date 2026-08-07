@@ -51,6 +51,10 @@ _SHARED_ENV = {
     "PYTHONUNBUFFERED": "1",
 }
 
+#: Parquet writer for the published feature table. Kept in the CPU image only --
+#: building a dataset release is I/O and schema work, not GPU work.
+PYARROW_VERSION = "19.0.1"
+
 _CPU_PACKAGES = (
     "pyyaml==6.0.2",
     "typer==0.15.2",
@@ -58,6 +62,7 @@ _CPU_PACKAGES = (
     f"huggingface_hub=={HUGGINGFACE_HUB_VERSION}",
     f"numpy=={NUMPY_VERSION}",
     f"safetensors=={SAFETENSORS_VERSION}",
+    f"pyarrow=={PYARROW_VERSION}",
 )
 
 _ML_PACKAGES = (
@@ -111,4 +116,5 @@ def pinned_versions() -> dict[str, str]:
         "safetensors": SAFETENSORS_VERSION,
         "huggingface_hub": HUGGINGFACE_HUB_VERSION,
         "numpy": NUMPY_VERSION,
+        "pyarrow": PYARROW_VERSION,
     }

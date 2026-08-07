@@ -45,7 +45,7 @@ Applying it adds `strength × unit_decoder_direction / input_scale` to the resid
 - **Not** evidence that SAE features are human concepts. A feature is a direction that helps reconstruct activations sparsely. Nothing more is established by that.
 - **Not** a claim that steering demonstrates beliefs, intentions, or any mental property.
 - **Not** a source of validated behavioural labels. Every feature description in this repo is a *hypothesis* and is marked as one. `evidence_level` never advances past `correlational` automatically.
-- **Not** free of side effects. Feature entanglement is expected; interventions damage unrelated capabilities. We measured a drop from 9/10 to 8/10 on capability probes at the strength used.
+- **Not** free of side effects. Feature entanglement is expected, and interventions **may** affect unrelated capabilities. The smoke test observed 9/10 vs 8/10 on ten hand-written probes — a single-item difference, far too small a sample to establish degradation in either direction.
 - **Not** portable across models, layers, or SAEs. Feature IDs are meaningless outside the SAE that produced them, and the format refuses mismatched application.
 - **Not** independent of generation settings or model revision. Both are pinned and recorded.
 
@@ -219,7 +219,9 @@ Design decisions that matter:
 
 **No string duplication.** Each activation row carries `(example_index, token_position, token_id)` as int32 — 12 bytes. Storing surrounding text per token would multiply the corpus size several-fold. Measured cost: **3084.01 bytes/token**, exactly `1536 × 2 + 12`.
 
-**Position 0 is dropped.** The first token of a decoder-only transformer is an attention sink. Measured at layer 18 of Qwen2.5-1.5B: **activation norm 11052 at position 0 against a corpus mean of ~70** — a factor of 156. Including it would dominate the input-scale normalisation and waste dictionary capacity on a positional artifact.
+**Position 0 is dropped.** Measured at layer 18 of Qwen2.5-1.5B, **position 0 exhibited an extreme residual-stream activation outlier: norm 11052 against a corpus mean of ~70**, a factor of 156. Including it would dominate the input-scale normalisation and spend dictionary capacity on a single positional artifact.
+
+The literature commonly attributes such first-token outliers to attention-sink behaviour, and that is a plausible explanation here — but **no attention weights were measured in this project**, so the mechanism is not something these results establish. What is measured is the outlier itself.
 
 **Padding is masked out.** Blocks of differing length are right-padded for batching, then padded positions are excluded before storage.
 
@@ -270,10 +272,22 @@ model = BrainPatchedModel.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct")
 model.load_sae("/vol/sae/smoke_v0/sae_latest.pt", reference="smoke_v0")
 
 model.install("patches/experimental-feature-727.json")
-model.set_patch_strength("experimental-feature-727", 1.5)
+# A MULTIPLIER on the patch's declared strength (16.0), not an absolute value.
+model.set_patch_strength("experimental-feature-727", 1.0)
 
-print(model.generate("Solve this problem..."))
+print(model.generate("Solve this problem: what is 17 + 25?"))
 ```
+
+A copy-paste version that fetches both the SAE checkpoint and the patch from the
+Hub is in the [model card](https://huggingface.co/09Catho/BrainPatch-Qwen2.5-1.5B);
+it is verified in a fresh Modal container by
+`modal run modal_app/app.py::verify_model_card_example`.
+
+> **The multiplier compounds.** At `1.0` (effective strength 16) the model
+> answered the prompt above correctly. At `1.5` (effective 24) it answered
+> `17 + 25 = 32` and digressed about the commutative property of multiplication,
+> where the unpatched model answered 42. Both were measured on Modal. Consult the
+> dose–response table before changing it.
 
 Ad-hoc exploration:
 
@@ -424,12 +438,40 @@ Feature 727 vs unrelated feature 1270, strength ±16, 6 prompts, greedy decoding
 
 ```
 positive − random_control    = −0.137     ← the wrong sign
-positive − unrelated_feature = +0.029     ← negligible
+positive − unrelated_feature = +0.029     ← RETRACTED, see below
 ```
 
-**The scale-matched random direction moved the output further from baseline than the real feature did.** An unrelated real feature performed indistinguishably. There is no evidence of a feature-specific causal effect.
+**The scale-matched random direction moved the output further from baseline than the real feature did.** There is no evidence of a feature-specific causal effect.
 
-*Statistical caveat:* 6 prompts, one greedy generation per condition, no repeated sampling, no significance testing. These are not effect sizes. They are enough to say the controls did not separate — not enough to quantify anything.
+> **Retraction: the unrelated-feature control was not unrelated.**
+> Feature 1270 was picked by the same `max_activation` ranking as the target and
+> turns out to be a near-duplicate of it — 3 fires in 20,000 tokens, the same top
+> token `" Bd"`, the same outlier cluster. That comparison is uninformative and
+> should be disregarded. The random-direction control is unaffected and the
+> headline result stands on it.
+
+#### Why this feature was a bad choice — a specific, fixable flaw
+
+Reading the published feature table (which only became possible once the dataset
+viewer was fixed) shows the selection rule was the problem:
+
+| | feature 727 | dictionary |
+|---|---|---|
+| fire count | **5** / 20,000 | median 271, mean 312.5 |
+| max activation | **1429.77** | median 9.06 |
+
+Feature 727 is the single most extreme outlier in the dictionary. Worse, the top
+**32** features by `max_activation` *all* fire on 3–6 tokens and *all* share the
+top token `" Bd"` — chess notation from a handful of wikitext articles. An
+undertrained SAE shatters rare high-norm tokens across many near-duplicate
+features, and ranking by `max_activation` finds precisely those.
+
+So `smoke_v0`'s negative result is better read as **"this selection rule picks
+degenerate features"** than as **"SAE directions carry no behavioural meaning"**.
+`rank_features()` now takes `min_firing_rate` and carries a warning; the fix is
+cheap and is the top item on the roadmap.
+
+*Statistical caveat:* 6 prompts, one greedy generation per condition, no repeated sampling, no significance testing. These are not effect sizes. They are enough to say the random-direction control did not separate — not enough to quantify anything.
 
 ### Utility retention
 
@@ -444,7 +486,7 @@ positive − unrelated_feature = +0.029     ← negligible
 | reasoning | 2/2 | 2/2 |
 | continuation length | 57.3 words | 69.7 words (1.22×) |
 
-A one-item change on ten probes carries no statistical weight. It is directionally consistent with steering degrading unrelated capability, and nothing stronger should be read into it.
+A one-item change on ten probes carries no statistical weight, and this sample cannot establish degradation. The direction is worth noting only as something a properly-powered experiment should check; nothing stronger should be read into it.
 
 ### Storage produced
 
@@ -514,11 +556,11 @@ Recorded with every artifact: model id and **resolved commit SHA**, layer, hook 
 
 Near term, in the order that would actually move the result:
 
-1. **More activations.** `serious_v1` is configured (500k tokens, d_sae 16384) but **not run** — it needs approval since it exceeds the 50k unapproved ceiling. See [`configs/experiments/serious_v1.yaml`](configs/experiments/serious_v1.yaml).
-2. **An instruction-formatted corpus**, so features can plausibly relate to behaviour.
-3. **Contrast-driven feature selection** rather than max-activation ranking. `brainpatch/ml/patch_search.py` implements it; it was not the selection rule for the result above.
-4. **Statistical power** — many prompts, repeated sampling, actual significance testing.
-5. **Log-probability measurement** instead of only free generation; lower variance per unit of compute.
+1. **Fix the feature-selection rule.** Now the clearest known flaw: `max_activation` ranking selected a degenerate outlier cluster for both the target *and* its control. Re-run the same experiment selecting features near the median firing rate, or via the contrast-driven search in `brainpatch/ml/patch_search.py`. This needs **no new extraction and no new SAE** — the artifacts already exist, so it is the cheapest possible next step and it directly tests the leading explanation for the null.
+2. **An instruction-formatted corpus**, so features can plausibly relate to behaviour. `wikitext` is generic prose against an instruction-tuned model.
+3. **Statistical power** — many prompts, repeated sampling, actual significance testing.
+4. **Log-probability measurement** instead of only free generation; lower variance per unit of compute.
+5. **More activations.** `serious_v1` is configured (500k tokens, d_sae 16384) but **not run** — it needs approval since it exceeds the 50k unapproved ceiling. See [`configs/experiments/serious_v1.yaml`](configs/experiments/serious_v1.yaml). Deliberately last: scaling an SAE whose features are selected by a broken rule, on the wrong corpus, mostly buys a better model of the wrong thing.
 
 Deliberately **not** implemented in v0: patch marketplace, automatic feature labelling, multi-layer SAEs, patch composition and conflict detection, cross-model feature alignment. The architecture leaves room for them; spending v0 compute on them before single-model steering works would be premature.
 
