@@ -1,0 +1,46 @@
+# Default Top-K sparse autoencoder settings.
+#
+# See brainpatch/schemas/sae.py for why each constraint exists. The two that
+# matter most for downstream interventions:
+#
+#   normalize_decoder: unit-norm decoder columns are what give `strength` a
+#     stable meaning. Without the constraint the network can rescale columns
+#     freely and a strength of 1.5 means nothing in particular.
+#
+#   input_scale: measured at training time, stored in the checkpoint, and used
+#     by the runtime to map a decoder direction back onto the raw residual
+#     stream. Never set it by hand.
+
+architecture:
+  d_sae: 2048
+  k: 32
+  normalize_decoder: true
+  tied_init: true
+
+dead_features:
+  # AuxK: dead features are asked to reconstruct the residual error, which gives
+  # them gradient signal without perturbing the main objective. Set auxk_alpha
+  # to 0 to disable.
+  auxk_alpha: 0.03125     # 1/32
+  auxk_k: 256
+  dead_feature_window: 20000
+
+optimizer:
+  lr: 3.0e-4
+  beta1: 0.9
+  beta2: 0.999
+  batch_size: 512
+  epochs: 60
+  max_steps: null
+  grad_clip: 1.0
+  lr_warmup_steps: 50
+
+data:
+  shuffle_buffer: 8192
+  val_fraction: 0.05
+
+run:
+  seed: 0
+  force: false
+  log_every: 25
+  checkpoint_every: 200

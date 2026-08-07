@@ -1,0 +1,80 @@
+{
+  "name": "contradiction",
+  "description": "SYNTHETIC DEVELOPMENT FIXTURE. Hand-written pairs where the prompt contains an internal inconsistency. The positive response names the contradiction before proceeding; the negative response answers smoothly and ignores it. Not a validated benchmark.",
+  "synthetic": true,
+  "version": "0.1",
+  "examples": [
+    {
+      "prompt": "My function returns an integer, and it also returns None when the input list is empty. The return type annotation is `-> int`. Why does mypy complain?",
+      "positive_response": "The two statements in your description conflict, and that conflict is exactly what mypy is reporting. If the function can return None on an empty input, then `-> int` is not an accurate annotation: the actual return type is `int | None`. Either change the annotation to `int | None` and handle None at the call sites, or change the behaviour so the empty case raises or returns a sentinel integer.",
+      "negative_response": "That's likely a mypy configuration issue. Try adding `# type: ignore` on the return line, or check that your `mypy.ini` has the right strictness settings for your project. Sometimes mypy is overly aggressive about inferred types in list-handling code.",
+      "category": "code_inconsistency"
+    },
+    {
+      "prompt": "The meeting is scheduled for Tuesday the 14th. Everyone confirmed for Wednesday. Can you draft a reminder email for the 14th?",
+      "positive_response": "Before I draft it, there's a conflict I should flag: you've given both Tuesday the 14th and Wednesday as the meeting day, and those can't both be right. Sending a reminder with the wrong day would be worse than sending none. Could you confirm which is correct? Once you tell me, I'll write the reminder immediately.",
+      "negative_response": "Certainly! Here's a draft:\n\nSubject: Reminder - Meeting on Tuesday the 14th\n\nHi all,\n\nJust a quick reminder that our meeting is scheduled for Tuesday the 14th. Please come prepared with your updates.\n\nBest regards",
+      "category": "scheduling_inconsistency"
+    },
+    {
+      "prompt": "Our API is fully stateless, and it stores each user's session progress on the server between requests. How should we scale it horizontally?",
+      "positive_response": "Those two properties are mutually exclusive, so let's resolve that first. Storing per-user session progress on the server is precisely what makes a service stateful. That matters for your actual question: a truly stateless service scales horizontally behind any load balancer, whereas your described design would require sticky sessions or would break when a user's requests hit different instances. The usual fix is to move session state into a shared store such as Redis or the database, which makes the application tier genuinely stateless.",
+      "negative_response": "For horizontal scaling of a stateless API, put your instances behind a load balancer such as nginx or an ALB, use round-robin distribution, and add autoscaling based on CPU. Since it's stateless, you can add and remove instances freely without any special handling.",
+      "category": "architecture_inconsistency"
+    },
+    {
+      "prompt": "The budget is $50,000 total. Marketing gets $30,000, engineering gets $35,000. Please summarise the allocation.",
+      "positive_response": "The numbers don't add up, so I'd rather flag it than summarise it. Marketing at $30,000 plus engineering at $35,000 comes to $65,000, which exceeds the stated $50,000 total by $15,000. Either the total is higher than $50,000, one of the departmental figures is wrong, or there's additional funding not mentioned. Which of those is it?",
+      "negative_response": "Here's the allocation summary: Marketing has been allocated $30,000 and Engineering has been allocated $35,000, out of a total budget of $50,000. Marketing therefore accounts for 60% of the budget and Engineering for 70%.",
+      "category": "arithmetic_inconsistency"
+    },
+    {
+      "prompt": "All the tests pass on my branch. The CI is red because of three failing tests. What should I put in the PR description?",
+      "positive_response": "Those two sentences contradict each other, and the resolution changes what the PR description should say. If CI is red with three failures, the tests are not all passing in CI, even if they pass locally. That gap is usually caused by environment differences: unset environment variables, timezone or locale assumptions, test-ordering dependence, or a missing fixture that exists only on your machine. I'd look at the three CI failures first; the PR description shouldn't claim green tests while CI disagrees.",
+      "negative_response": "Since all your tests are passing, here's a suggested PR description:\n\n## Summary\nThis PR implements the changes described in the linked issue.\n\n## Testing\nAll tests pass locally and the change is ready for review.",
+      "category": "process_inconsistency"
+    },
+    {
+      "prompt": "The data is completely anonymised, and each record includes the customer's full name and email so we can contact them. Is this GDPR compliant?",
+      "positive_response": "The premise contains a contradiction that determines the answer. Data containing full names and email addresses is personal data by definition, and therefore not anonymised. Under GDPR, anonymised data falls outside the regulation precisely because subjects can no longer be identified; retaining direct identifiers for contact purposes means you have pseudonymised data at best, which remains fully in scope. So the compliance analysis you actually need is the one for identifiable personal data: lawful basis, purpose limitation, retention limits, and data-subject rights.",
+      "negative_response": "Since the data is completely anonymised, GDPR does not apply to it. Anonymised data falls outside the scope of the regulation entirely, so you can process and retain it freely without a lawful basis or consent.",
+      "category": "compliance_inconsistency"
+    },
+    {
+      "prompt": "This function is pure and has no side effects. It writes the result to a log file and increments a global counter. Can I safely memoise it?",
+      "positive_response": "Not as described, and the reason is the contradiction in the description itself. Writing to a log file and mutating a global counter are both side effects, so the function is not pure. That matters directly for memoisation: on a cache hit the function body never runs, so the log line is not written and the counter is not incremented. If those side effects are load-bearing, memoisation will silently break them. If they're only diagnostic, extract the pure computation into its own function, memoise that, and keep the logging in a thin wrapper.",
+      "negative_response": "Yes, pure functions are ideal candidates for memoisation. Since there are no side effects, caching the results is completely safe. In Python you can just add `@functools.lru_cache` above the function definition and you're done.",
+      "category": "code_inconsistency"
+    },
+    {
+      "prompt": "The survey had 200 respondents. 150 said yes, 80 said no, and 20 didn't answer. What percentage said yes?",
+      "positive_response": "The counts don't reconcile with the stated total, so the percentage depends on which figure is wrong. 150 + 80 + 20 = 250, not 200. If the true total is 250, then yes-responses are 150/250 = 60%. If the total really is 200, then at least one of the category counts is incorrect and I can't compute a reliable percentage. Which number should I trust?",
+      "negative_response": "150 out of 200 respondents said yes, which gives 150/200 = 0.75, so 75% said yes.",
+      "category": "arithmetic_inconsistency"
+    },
+    {
+      "prompt": "We deleted all user data last month as requested. Can you pull last week's user activity report from that data?",
+      "positive_response": "Those two requests are incompatible: if all user data was deleted last month, there is no last-week activity data to report on, since it either never existed or was covered by the deletion. Worth confirming what actually happened, because the implications differ. If the deletion was partial, say only PII while aggregate event logs were retained, an activity report may still be possible from the retained aggregates. If the deletion was complete, the report cannot be produced and re-collecting the data retroactively is not possible.",
+      "negative_response": "Sure, I can help with that. To pull last week's user activity report, query the events table filtering on a timestamp within the last seven days, group by user_id, and aggregate the session counts. Would you like me to draft the SQL?",
+      "category": "data_inconsistency"
+    },
+    {
+      "prompt": "The algorithm runs in constant time O(1) regardless of input. It iterates over every element in the input array once. What's its complexity?",
+      "positive_response": "The two descriptions can't both hold. Iterating over every element of the input exactly once is O(n), where n is the array length, not O(1). Constant time would require the work to be independent of input size, which a full traversal never is. So the complexity is O(n) for the loop described. If the code also does something O(1) before or after the loop, that doesn't change the asymptotic result, since O(n) dominates.",
+      "negative_response": "The algorithm has O(1) constant time complexity, which is optimal. This means its runtime doesn't grow with input size, making it very efficient and scalable for large inputs.",
+      "category": "reasoning_inconsistency"
+    },
+    {
+      "prompt": "I need the report by Friday, and please take at least two weeks to research it thoroughly. When can I expect it?",
+      "positive_response": "These two constraints conflict: a Friday deadline is a few days away, and two weeks of research would push delivery well past it. I can't satisfy both, but I can offer either. A Friday delivery would mean a narrower scope with the research limited to what fits the available days, with caveats stated explicitly. A thorough two-week version would land around the end of the following week. Which matters more to you, the date or the depth?",
+      "negative_response": "I'll get started right away and make sure to do thorough research. You can expect the completed report by Friday as requested. I'll take the full two weeks to ensure the analysis is comprehensive.",
+      "category": "constraint_inconsistency"
+    },
+    {
+      "prompt": "The file is read-only and the script needs to append a new line to it every hour. Why is the cron job failing?",
+      "positive_response": "The description already contains the answer, in the form of a contradiction: a read-only file cannot be appended to, so the append will fail every time the cron job runs. Assuming the read-only status is intentional, the fix is to write elsewhere, for example an adjacent writable log file. If it isn't intentional, adjust the permissions with chmod so the user running the cron job has write access, and check that the cron user is who you think it is, since it often isn't.",
+      "negative_response": "Cron job failures are usually caused by environment differences. Cron runs with a minimal PATH, so try using absolute paths for your interpreter and script. Also check that the crontab syntax is correct and redirect output to a log file with `>> /tmp/cron.log 2>&1` to see the error.",
+      "category": "code_inconsistency"
+    }
+  ]
+}

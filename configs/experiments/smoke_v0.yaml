@@ -1,0 +1,79 @@
+# smoke_v0 -- the end-to-end pipeline verification experiment.
+#
+# This configuration reflects what was ACTUALLY RUN, not an aspiration. Its
+# purpose is to prove the pipeline works, not to produce a good SAE. At 20k
+# activations against a 2048-feature dictionary the SAE overfits measurably
+# (train explained variance 0.762 vs validation 0.658) and that is expected.
+#
+# Reproduce with:
+#   modal run modal_app/app.py::smoke_pipeline
+
+name: smoke_v0
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dtype: bfloat16
+  # Discovered, not assumed: 28 decoder blocks, hidden size 1536.
+  hidden_size: 1536
+  num_layers: 28
+
+hook:
+  layer: 18
+  site: residual_post
+
+corpus:
+  dataset: Salesforce/wikitext
+  config: wikitext-2-raw-v1
+  split: train
+  sequence_length: 256
+  min_block_tokens: 64
+  min_doc_chars: 200
+  max_documents: 20000
+  seed: 0
+
+extraction:
+  target_tokens: 20000
+  batch_size: 8
+  shard_size: 100000
+  store_dtype: bfloat16
+  # Position 0 is an attention sink: its measured activation norm at layer 18 is
+  # ~11052 against a corpus mean of ~70, a factor of 156. Including it would
+  # dominate the input-scale normalisation and waste dictionary capacity on a
+  # single positional artifact.
+  skip_first_n_tokens: 1
+  seed: 0
+
+sae:
+  d_sae: 2048
+  k: 32
+  lr: 3.0e-4
+  batch_size: 512
+  epochs: 60
+  auxk_alpha: 0.03125
+  auxk_k: 256
+  dead_feature_window: 20000
+  val_fraction: 0.05
+  normalize_decoder: true
+  tied_init: true
+  grad_clip: 1.0
+  lr_warmup_steps: 50
+  seed: 0
+
+analysis:
+  top_k_contexts: 8
+  context_window: 12
+
+intervention:
+  # Chosen from a measured dose-response sweep (0, 2, 4, 8, 16, 32, 64), not
+  # guessed. Below 8 the output is unchanged; at 32 the model loops; at 64 it
+  # collapses. 16 is inside the window where behaviour changes and fluency holds.
+  strength: 16.0
+  max_new_tokens: 96
+  num_prompts: 6
+  do_sample: false
+  control_seed: 1234
+
+compute:
+  gpu: L4
+  num_gpus: 1

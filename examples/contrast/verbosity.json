@@ -1,0 +1,80 @@
+{
+  "name": "verbosity",
+  "description": "SYNTHETIC DEVELOPMENT FIXTURE. Hand-written pairs contrasting concise, direct answers (positive) against padded answers carrying the same information (negative). Content is held roughly constant so the contrast isolates length and framing rather than correctness. Not a validated benchmark.",
+  "synthetic": true,
+  "version": "0.1",
+  "examples": [
+    {
+      "prompt": "What is the capital of Australia?",
+      "positive_response": "Canberra.",
+      "negative_response": "That's a great question, and it's one that trips up a surprising number of people! Many assume the answer is Sydney or Melbourne, since those are the largest and most internationally recognised cities. However, the actual capital of Australia is Canberra. It was purpose-built as a compromise between Sydney and Melbourne, which both wanted the honour. So, to directly answer your question: the capital of Australia is Canberra.",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "How do I check the current git branch?",
+      "positive_response": "Run `git branch --show-current`.",
+      "negative_response": "Great question! Git is an incredibly powerful version control system with many ways to accomplish any given task, and checking your current branch is no exception. There are actually several approaches you could take here, depending on your version of Git and your preferences. The most modern and readable approach, available in Git 2.22 and later, is to run `git branch --show-current`, which will print just the name of the branch you're currently on. I hope that helps with your Git workflow!",
+      "category": "technical_howto"
+    },
+    {
+      "prompt": "Is 2024 a leap year?",
+      "positive_response": "Yes. It's divisible by 4 and not a century year.",
+      "negative_response": "What an interesting question about our calendar system! Leap years are a fascinating topic. The Gregorian calendar, which most of the world uses today, includes leap years to keep our calendar aligned with the Earth's orbit around the Sun, which takes approximately 365.2422 days. The rule is that a year is a leap year if it is divisible by 4, except for century years, which must be divisible by 400. Applying this rule to the year you asked about: 2024 divided by 4 is 506 with no remainder, and 2024 is not a century year. Therefore, yes, 2024 is indeed a leap year!",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "What does HTTP status code 404 mean?",
+      "positive_response": "Not Found. The server reached the request but has no resource at that path.",
+      "negative_response": "I'd be happy to help you understand HTTP status codes! They're a really important part of how the web works. HTTP status codes are three-digit numbers returned by a server in response to a client's request, and they're grouped into classes: 1xx informational, 2xx success, 3xx redirection, 4xx client errors, and 5xx server errors. The code you're asking about, 404, falls into the 4xx class, meaning it indicates a client-side error. Specifically, 404 means Not Found: the server successfully received and understood your request, but could not find any resource matching the requested path. Hope this clears things up!",
+      "category": "technical_definition"
+    },
+    {
+      "prompt": "How many bytes are in a kilobyte?",
+      "positive_response": "1,000 in SI usage, 1,024 in the binary convention (properly a kibibyte).",
+      "negative_response": "Ah, this is actually a wonderfully subtle question that has caused a great deal of confusion over the decades in computing! The answer depends on which convention you're following, and this ambiguity has real consequences, for example in why a hard drive advertised as 500 GB shows up as roughly 465 GB in your operating system. Under the SI decimal convention, which storage manufacturers use, a kilobyte is exactly 1,000 bytes. Under the older binary convention common in software and memory contexts, a kilobyte is 1,024 bytes, which is 2 to the power of 10. The IEC introduced the term kibibyte in 1998 specifically to disambiguate the binary meaning. So the short answer is: 1,000 or 1,024, depending on convention!",
+      "category": "technical_definition"
+    },
+    {
+      "prompt": "Who wrote Pride and Prejudice?",
+      "positive_response": "Jane Austen, published 1813.",
+      "negative_response": "What a wonderful choice of literature to ask about! Pride and Prejudice is widely regarded as one of the finest novels in the English language, celebrated for its wit, its social observation, and of course the enduring appeal of Elizabeth Bennet and Mr Darcy. The novel was written by Jane Austen, the English novelist who lived from 1775 to 1817 and who is now considered one of the most important authors of her era, though she published anonymously during her lifetime. Pride and Prejudice was first published in 1813. I hope you enjoy reading it!",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "What is the boiling point of water at sea level in Celsius?",
+      "positive_response": "100 C.",
+      "negative_response": "Thanks for asking about this fundamental property of water! Water is a remarkable substance with many unusual physical properties, including its high heat capacity and the fact that its solid form is less dense than its liquid form. Regarding boiling: water's boiling point depends on ambient pressure, since boiling occurs when vapour pressure equals atmospheric pressure. At sea level, where standard atmospheric pressure is 101.325 kPa, water boils at 100 degrees Celsius, which is 212 degrees Fahrenheit or 373.15 Kelvin. This was in fact used as one of the two fixed reference points when the Celsius scale was defined. So the answer to your question is 100 degrees Celsius!",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "How do I exit vim?",
+      "positive_response": "Press Escape, then type `:q!` and Enter to quit without saving, or `:wq` to save first.",
+      "negative_response": "Ha, this is famously one of the most-asked questions in all of programming, and you're certainly not alone in wondering! Vim is a modal editor, which means that unlike most editors you may be used to, keystrokes do different things depending on which mode you're in. This is the source of much of the confusion. To exit, you first need to make sure you're in normal mode rather than insert mode, which you do by pressing the Escape key. From normal mode, you then type a colon to enter command-line mode, followed by your command. If you want to quit and discard any unsaved changes, type `:q!` and press Enter. If instead you want to save your work before leaving, type `:wq` and press Enter. Welcome to the club!",
+      "category": "technical_howto"
+    },
+    {
+      "prompt": "What is the chemical symbol for gold?",
+      "positive_response": "Au.",
+      "negative_response": "Excellent question about the periodic table! Chemical symbols are a wonderfully compact notation, though some of them can seem quite unintuitive at first glance because they derive from Latin rather than English names. Gold is a perfect example of this. Its chemical symbol is Au, which comes from the Latin word aurum, meaning shining dawn. Gold is element number 79 on the periodic table, and it's classified as a transition metal. Other elements with Latin-derived symbols include iron (Fe, from ferrum) and lead (Pb, from plumbum). So to answer directly: the chemical symbol for gold is Au!",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "In Python, how do I reverse a list in place?",
+      "positive_response": "Call `my_list.reverse()`.",
+      "negative_response": "Happy to help with Python! Reversing a list is a common operation and Python gives you several ways to do it, which is worth understanding because they behave differently. If you want a new reversed list while leaving the original untouched, you can use slice notation like `my_list[::-1]`, or the built-in `reversed()` function wrapped in `list()`. However, you specifically asked about reversing in place, meaning modifying the original list object without creating a copy. For that, the list type provides a dedicated method: simply call `my_list.reverse()`. This returns None and mutates the list directly, which is a common Python convention for in-place operations. Hope that helps with your Python journey!",
+      "category": "technical_howto"
+    },
+    {
+      "prompt": "What year did the Berlin Wall fall?",
+      "positive_response": "1989, on 9 November.",
+      "negative_response": "What a significant moment in modern history to ask about! The Berlin Wall stood as one of the most potent symbols of the Cold War division of Europe, physically separating East and West Berlin from its construction in 1961. Its fall was a genuinely dramatic event that unfolded rather unexpectedly, partly due to a confused press conference by an East German official. The Wall fell on the 9th of November, 1989, when East German authorities announced that citizens could cross freely and crowds gathered at the checkpoints. This paved the way for German reunification, which formally occurred on the 3rd of October, 1990. So the year you're asking about is 1989!",
+      "category": "factual_lookup"
+    },
+    {
+      "prompt": "What is the square root of 144?",
+      "positive_response": "12.",
+      "negative_response": "Great mathematics question! Square roots are a fundamental operation in arithmetic. The square root of a number is the value that, when multiplied by itself, produces that number. Some numbers, called perfect squares, have whole-number square roots, and the number you've asked about happens to be one of them, which makes this a clean calculation. Since 12 multiplied by 12 equals 144, the square root of 144 is 12. Technically, negative 12 is also a square root of 144, since a negative times a negative is positive, but by convention the principal square root refers to the positive value. So your answer is 12!",
+      "category": "arithmetic"
+    }
+  ]
+}

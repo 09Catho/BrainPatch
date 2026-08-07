@@ -1,0 +1,62 @@
+{
+  "authors": [],
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "description": "Single-feature steering direction from the smoke_v0 SAE. This patch is named after its feature ID because nothing about its behaviour has been established. Steering it at strength 16 does change the model's output (mean 3-gram divergence 0.71 from baseline over 6 prompts), but a SCALE-MATCHED RANDOM DIRECTION of identical L2 norm changed the output MORE (0.85), and an unrelated real feature changed it about the same (0.68). There is therefore no evidence that this direction carries any specific behavioural meaning. Published as a reproducible artifact of the smoke_v0 pipeline, not as a working behavioural patch.",
+  "evaluation": {
+    "experiment": "smoke_v0_intervention",
+    "num_prompts": 6,
+    "generation": "greedy, max_new_tokens=96, identical settings across all conditions",
+    "delta_norm_all_conditions": 28.51780128479004,
+    "divergence_from_baseline": {
+      "zero": 0.0,
+      "positive": 0.709797049449183,
+      "negative": 0.7314236228213818,
+      "random_positive": 0.8469011791109867,
+      "random_negative": 0.698357839417966,
+      "unrelated_positive_feature_1270": 0.6808128064619702
+    },
+    "effect_vs_controls": {
+      "positive_minus_random": -0.13710412966180374,
+      "positive_minus_unrelated": 0.028984242987212805
+    },
+    "zero_strength_matches_baseline": "6/6 prompts byte-identical",
+    "utility_probes": {
+      "baseline_accuracy": 0.9,
+      "patched_accuracy": 0.8,
+      "accuracy_delta": -0.1,
+      "n_probes": 10,
+      "note": "10 hand-written probes; a 1-item change carries no statistical weight"
+    },
+    "conclusion": "NEGATIVE. Controls do not support a feature-specific causal effect. The infrastructure is verified; the behavioural claim is not.",
+    "statistical_caveat": "6 prompts, single greedy generation per condition, no repeated sampling. These differences have no significance testing behind them and should not be read as effect sizes."
+  },
+  "evidence_level": "none",
+  "features": [
+    {
+      "feature_id": 727,
+      "mode": "add",
+      "strength": 16.0
+    }
+  ],
+  "format_version": "0.1",
+  "license": "Apache-2.0",
+  "metadata": {
+    "corpus": "Salesforce/wikitext:wikitext-2-raw-v1 train, 20000 activation tokens",
+    "sae_training": "2220 steps, train explained variance 0.762, validation 0.658",
+    "selection_rule": "highest max_activation among features firing on <50% of tokens",
+    "strength_rationale": "Measured dose-response sweep: strength 8-16 changes output without triggering degeneration; 32 loops; 64 collapses. Residual-stream L2 norm at layer 18 is approximately 70 in raw units.",
+    "warning": "Feature IDs are meaningless outside the smoke_v0 SAE. This file cannot be applied to another model, another layer, or another SAE."
+  },
+  "model_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "name": "experimental-feature-727",
+  "sae": {
+    "d_in": 1536,
+    "d_sae": 2048,
+    "hook": "residual_post",
+    "input_scale": 0.5610531069008018,
+    "layer": 18,
+    "reference": "smoke_v0",
+    "sha256": null
+  },
+  "schedule": null
+}

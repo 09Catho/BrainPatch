@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# BrainPatch .gitignore
+#
+# Policy: the local machine is a source-editing + Modal control-plane machine.
+# Model weights, activations, checkpoints and caches live on the Modal Volume
+# (`brainpatch-data`), never in this repository.
+# ---------------------------------------------------------------------------
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+.modal.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ML artifacts that must NEVER be committed
+*.pt
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+*.gguf
+*.onnx
+*.npz
+*.npy
+
+# Local data / caches (must not exist, but belt-and-braces)
+local-data/
+local-cache/
+activations/
+checkpoints/
+hf-cache/
+hf_cache/
+.cache/
+models/
+datasets_cache/
+
+# Downloaded experiment artifacts (artifacts live on the Modal Volume)
+experiments/**/activations/
+experiments/**/checkpoints/
+experiments/**/*.safetensors
+reports/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Bundled third-party skill docs (installed via `modal skills`, not ours to redistribute)
+.claude/

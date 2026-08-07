@@ -1,0 +1,80 @@
+{
+  "name": "verification",
+  "description": "SYNTHETIC DEVELOPMENT FIXTURE. Hand-written pairs contrasting responses that explicitly check their own work (restating constraints, re-deriving, sanity-checking units) against responses that assert an answer immediately. Not a validated benchmark.",
+  "synthetic": true,
+  "version": "0.1",
+  "examples": [
+    {
+      "prompt": "A train travels 120 km in 1.5 hours. What is its average speed?",
+      "positive_response": "Average speed is distance over time: 120 km / 1.5 h = 80 km/h. Let me check that: 80 km/h for 1.5 hours gives 80 x 1.5 = 120 km, which matches the stated distance. Units are km/h as expected. So 80 km/h.",
+      "negative_response": "80 km/h.",
+      "category": "arithmetic"
+    },
+    {
+      "prompt": "If I have 3 boxes with 7 apples each, and I give away 5 apples, how many are left?",
+      "positive_response": "Starting total: 3 boxes x 7 apples = 21 apples. After giving away 5: 21 - 5 = 16. Sanity check: 16 + 5 = 21, which is the original total, so the subtraction is consistent. The answer is 16 apples.",
+      "negative_response": "16 apples.",
+      "category": "arithmetic"
+    },
+    {
+      "prompt": "Is 91 a prime number?",
+      "positive_response": "Let me test divisors up to sqrt(91), which is about 9.54, so I need to check 2, 3, 5, and 7. It is odd, so not divisible by 2. Digit sum is 10, not a multiple of 3. It doesn't end in 0 or 5. And 91 / 7 = 13 exactly. Since 7 x 13 = 91, it is composite, not prime.",
+      "negative_response": "Yes, 91 is a prime number.",
+      "category": "arithmetic"
+    },
+    {
+      "prompt": "Convert 45 degrees Fahrenheit to Celsius.",
+      "positive_response": "Using C = (F - 32) x 5/9: (45 - 32) = 13, then 13 x 5/9 = 65/9 = 7.22 C. Let me verify by converting back: 7.22 x 9/5 = 13, plus 32 = 45 F. That matches. Also a rough sanity check: 45 F is cool but above freezing, and 7.2 C is indeed cool but above 0 C. So about 7.2 C.",
+      "negative_response": "45 F is 7.22 C.",
+      "category": "unit_conversion"
+    },
+    {
+      "prompt": "A rectangle has a perimeter of 24 cm and a width of 4 cm. What is its area?",
+      "positive_response": "Perimeter is 2(length + width), so 24 = 2(L + 4), giving L + 4 = 12 and L = 8 cm. Area is then 8 x 4 = 32 cm^2. Checking the perimeter with these values: 2(8 + 4) = 24 cm, which matches the given perimeter. Units are cm^2 as expected for an area. So 32 cm^2.",
+      "negative_response": "The area is 32 cm^2.",
+      "category": "geometry"
+    },
+    {
+      "prompt": "What is 15% of 240?",
+      "positive_response": "10% of 240 is 24, and 5% is half of that, 12. So 15% is 24 + 12 = 36. Cross-checking with direct multiplication: 240 x 0.15 = 36. Both routes agree, so the answer is 36.",
+      "negative_response": "36.",
+      "category": "arithmetic"
+    },
+    {
+      "prompt": "If a shirt costs $80 after a 20% discount, what was the original price?",
+      "positive_response": "A 20% discount means the price paid is 80% of the original, so original x 0.8 = 80, giving original = 80 / 0.8 = $100. Let me verify: 20% of 100 is 20, and 100 - 20 = 80, which matches the stated sale price. Note the common trap of adding 20% to 80 (giving 96), which would be wrong because the percentage applies to the original, not the discounted price. The answer is $100.",
+      "negative_response": "The original price was $100.",
+      "category": "percentages"
+    },
+    {
+      "prompt": "How many seconds are in a day?",
+      "positive_response": "Build it up stepwise: 60 seconds per minute x 60 minutes per hour = 3,600 seconds per hour. Then 3,600 x 24 hours = 86,400 seconds. Checking the multiplication another way: 3,600 x 24 = 3,600 x 20 + 3,600 x 4 = 72,000 + 14,400 = 86,400. Both agree, so 86,400 seconds in a 24-hour day.",
+      "negative_response": "86,400 seconds.",
+      "category": "unit_conversion"
+    },
+    {
+      "prompt": "The sequence is 2, 6, 12, 20, 30. What comes next?",
+      "positive_response": "Let me look at the differences: 6-2=4, 12-6=6, 20-12=8, 30-20=10. The differences increase by 2 each time, so the next difference should be 12, giving 30 + 12 = 42. Checking against a closed form: the terms look like n(n+1) for n = 1..5, which gives 2, 6, 12, 20, 30. For n=6 that is 6 x 7 = 42. Both methods agree: 42.",
+      "negative_response": "42.",
+      "category": "sequences"
+    },
+    {
+      "prompt": "A car uses 8 litres of fuel per 100 km. How much fuel for a 250 km trip?",
+      "positive_response": "The rate is 8 L per 100 km, so per km that is 0.08 L. For 250 km: 250 x 0.08 = 20 L. Let me check with proportions instead: 250 km is 2.5 times 100 km, and 2.5 x 8 = 20 L. Both give the same result, and 20 L is a plausible magnitude for a 250 km trip. Answer: 20 litres.",
+      "negative_response": "20 litres.",
+      "category": "rates"
+    },
+    {
+      "prompt": "What is the sum of the interior angles of a hexagon?",
+      "positive_response": "The formula is (n - 2) x 180 degrees for an n-sided polygon. For n = 6: (6 - 2) x 180 = 4 x 180 = 720 degrees. Sanity check against a known case: for a triangle, n = 3 gives (3-2) x 180 = 180, which is correct, so the formula is being applied the right way round. Answer: 720 degrees.",
+      "negative_response": "720 degrees.",
+      "category": "geometry"
+    },
+    {
+      "prompt": "If 5 machines make 5 widgets in 5 minutes, how long do 100 machines take to make 100 widgets?",
+      "positive_response": "Careful with this one, the intuitive answer of 100 minutes is a trap. From the premise, 5 machines make 5 widgets in 5 minutes, so each machine makes 1 widget in 5 minutes. That rate is per-machine and doesn't change with fleet size. With 100 machines working in parallel, each still makes 1 widget in 5 minutes, so 100 widgets take 5 minutes. Verifying the rate: 100 machines x (1 widget / 5 min) = 20 widgets/min, and 100 / 20 = 5 minutes. Answer: 5 minutes.",
+      "negative_response": "100 minutes.",
+      "category": "rates"
+    }
+  ]
+}

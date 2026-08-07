@@ -1,0 +1,132 @@
+# serious_v1 -- PREPARED, NOT RUN.
+#
+# This configuration has never been executed. Every number in the `projection`
+# block below is extrapolated from MEASURED smoke_v0 throughput, and is labelled
+# as a projection rather than a result.
+#
+# Running it requires explicit human approval, because it exceeds the
+# unapproved activation-token ceiling (50,000). The extraction entry point will
+# refuse it unless `approved=true` is passed:
+#
+#   modal run modal_app/app.py::extract_activations \
+#       --experiment serious_v1 --layer 18 --target-tokens 500000 \
+#       --batch-size 16 --approved
+#   modal run modal_app/app.py::train_sae \
+#       --experiment serious_v1 --d-sae 16384 --k 32 --epochs 8
+#   modal run modal_app/app.py::analyze_features --experiment serious_v1
+#   modal run modal_app/app.py::intervention_experiment \
+#       --experiment serious_v1 --run-name serious_v1_intervention --strength 16
+
+name: serious_v1
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  dtype: bfloat16
+  hidden_size: 1536
+  num_layers: 28
+
+hook:
+  layer: 18
+  site: residual_post
+
+corpus:
+  dataset: Salesforce/wikitext
+  config: wikitext-2-raw-v1
+  split: train
+  sequence_length: 256
+  min_block_tokens: 64
+  min_doc_chars: 200
+  max_documents: 40000
+  seed: 0
+
+extraction:
+  target_tokens: 500000
+  batch_size: 16
+  # 500k tokens x 3084 bytes = ~1.44 GB total. Sharding at 100k keeps each file
+  # near 300 MB, which is a comfortable size to stream and to resume from.
+  shard_size: 100000
+  store_dtype: bfloat16
+  skip_first_n_tokens: 1
+  seed: 0
+  # Required: exceeds the 50,000-token unapproved ceiling.
+  requires_approval: true
+
+sae:
+  d_sae: 16384
+  k: 32
+  lr: 2.0e-4
+  batch_size: 2048
+  epochs: 8
+  auxk_alpha: 0.03125
+  auxk_k: 512
+  # Scaled with the corpus: a feature silent for 500k tokens is genuinely dead,
+  # whereas the smoke_v0 window of 20k would flag normal low-frequency features.
+  dead_feature_window: 500000
+  val_fraction: 0.02
+  normalize_decoder: true
+  tied_init: true
+  grad_clip: 1.0
+  lr_warmup_steps: 200
+  seed: 0
+
+analysis:
+  top_k_contexts: 16
+  context_window: 16
+  # 500k x 16384 float32 = 32 GB dense. The in-memory analysis path caps at 2 GB
+  # and will refuse this, so serious_v1 must use the streaming path.
+  requires_streaming_analysis: true
+
+intervention:
+  strength: 16.0
+  max_new_tokens: 128
+  num_prompts: 20
+  do_sample: false
+  control_seed: 1234
+
+compute:
+  gpu: L4
+  num_gpus: 1
+
+# ---------------------------------------------------------------------------
+# PROJECTIONS -- extrapolated from measured smoke_v0 numbers. Not results.
+# ---------------------------------------------------------------------------
+projection:
+  basis:
+    measured_extraction_tokens_per_second: 2390.4   # smoke_v0, L4, batch 8
+    measured_bytes_per_token: 3084.01               # smoke_v0, bf16 + int32 meta
+    measured_sae_steps_per_second: 28.229           # smoke_v0, d_sae=2048, batch 512
+    measured_extraction_peak_vram_mb: 3553.4
+    measured_sae_peak_vram_mb: 295.4
+    measured_model_load_seconds: 7.72               # from warm Volume cache
+
+  extraction:
+    tokens: 500000
+    projected_seconds: 209        # 500000 / 2390.4; batch 16 may improve this
+    projected_storage_gb: 1.44    # 500000 * 3084.01 bytes
+    caveat: >-
+      Throughput was measured at batch_size 8. Raising it to 16 should help but
+      has not been measured, so this projection uses the measured rate unchanged.
+
+  sae_training:
+    train_rows: 490000
+    steps_per_epoch: 239          # 490000 / 2048
+    total_steps: 1912             # 8 epochs
+    projected_seconds_naive: 68   # 1912 / 28.229
+    caveat: >-
+      The measured 28.2 steps/s was for d_sae=2048 at batch 512. serious_v1 uses
+      an 8x larger dictionary and a 4x larger batch, so per-step cost rises
+      substantially. Treat the naive figure as a floor, not an estimate; a
+      realistic guess is several times higher, and it has not been measured.
+    projected_peak_vram_gb: 2.6
+    vram_basis: >-
+      Parameters scale 8x with the dictionary (2 * 1536 * 16384 + 16384 + 1536 =
+      50.4M params). Adam states triple that. Activations scale with
+      batch x d_sae. Comfortably inside the L4's 22 GB.
+
+  total_l4_minutes_estimate: 15
+  total_cost_estimate_usd: 0.25
+  cost_caveat: >-
+    Based on published L4 pricing and the projected runtime above, plus
+    container start-up. Actual Modal billing has not been read back
+    programmatically, so this is an estimate and not a measured spend.

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brainpatch"
+version = "0.1.0"
+description = "Experimental activation-space behavioural interventions for frozen language models."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "BrainPatch contributors" }]
+keywords = [
+    "mechanistic-interpretability",
+    "sparse-autoencoder",
+    "activation-steering",
+    "modal",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+]
+
+# NOTE: the *core* dependency set is deliberately tiny. `import brainpatch` must
+# work on a laptop with no ML stack installed. Everything heavy (torch,
+# transformers, datasets, ...) is installed only inside the Modal Image and is
+# imported lazily from `brainpatch.ml.*`.
+dependencies = [
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# Control plane: what you need locally to *launch* Modal jobs.
+modal = ["modal>=1.5.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+brainpatch = "brainpatch.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/09Catho/BrainPatch"
+Repository = "https://github.com/09Catho/BrainPatch"
+
+[tool.setuptools.packages.find]
+include = ["brainpatch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Local test runs must never touch Modal or a GPU. Remote tests are opt-in and
+# live behind explicit `modal run` commands, not pytest.
+addopts = "-q --strict-markers"
+markers = [
+    "local: pure-python test, no ML stack, no network (the default)",
+]

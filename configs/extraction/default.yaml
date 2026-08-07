@@ -1,0 +1,34 @@
+# Default activation-extraction settings.
+#
+# Overridable from the CLI with dotted keys, e.g.
+#   --set extraction.target_tokens=50000 --set hook.layer=12
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  revision: null          # null resolves to the current `main` SHA and records it
+  dtype: bfloat16
+
+hook:
+  layer: 18
+  site: residual_post
+
+corpus:
+  dataset: Salesforce/wikitext
+  config: wikitext-2-raw-v1
+  split: train
+  text_column: text
+  sequence_length: 256
+  min_block_tokens: 64
+  min_doc_chars: 200
+  max_documents: 20000
+  seed: 0
+
+extraction:
+  target_tokens: 20000
+  batch_size: 8
+  shard_size: 100000
+  store_dtype: bfloat16
+  skip_first_n_tokens: 1
+  seed: 0
+  force: false
+  approved: false         # must be true above 50,000 tokens

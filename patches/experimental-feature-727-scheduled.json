@@ -1,0 +1,47 @@
+{
+  "authors": [],
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "description": "The same unvalidated feature-727 direction, with a token-indexed schedule, demonstrating dynamic mid-generation steering. The intervention is off for the first 24 generated tokens, switches on at token 24, and doubles at token 48. Measured delta norms during a real generation were 0.0 at tokens 0-23, 28.518 at token 24, and 57.036 at token 48, matching the predicted schedule to within 3.6e-06. This patch demonstrates a RUNTIME CAPABILITY. It makes no behavioural claim whatsoever: see experimental-feature-727.json for the control results, which are negative.",
+  "evaluation": {
+    "experiment": "dynamic_steering_demo",
+    "measured_delta_norm_by_generated_token": {
+      "0": 0.0,
+      "23": 0.0,
+      "24": 28.51780128479004,
+      "48": 57.03560256958008
+    },
+    "max_abs_error_vs_expected_schedule": 3.6103930867170675e-06,
+    "matches_expected_schedule": true,
+    "conclusion": "Token-indexed strength scheduling works as specified. No behavioural effect is claimed."
+  },
+  "evidence_level": "none",
+  "features": [
+    {
+      "feature_id": 727,
+      "mode": "add",
+      "strength": 16.0
+    }
+  ],
+  "format_version": "0.1",
+  "license": "Apache-2.0",
+  "metadata": {
+    "purpose": "runtime capability demonstration",
+    "schedule_semantics": "Keys are GENERATED-token indices (the prompt is not counted). Values multiply the feature strength. Step-hold: the value at index n is the value of the largest keyframe <= n."
+  },
+  "model_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "name": "experimental-feature-727-scheduled",
+  "sae": {
+    "d_in": 1536,
+    "d_sae": 2048,
+    "hook": "residual_post",
+    "input_scale": 0.5610531069008018,
+    "layer": 18,
+    "reference": "smoke_v0",
+    "sha256": null
+  },
+  "schedule": {
+    "0": 0.0,
+    "24": 1.0,
+    "48": 2.0
+  }
+}
