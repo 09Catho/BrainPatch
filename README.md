@@ -6,6 +6,8 @@
 [![Compute](https://img.shields.io/badge/compute-Modal%20L4-brightgreen.svg)](https://modal.com)
 [![Base model](https://img.shields.io/badge/base-Qwen2.5--1.5B--Instruct-orange.svg)](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)
 
+**Artifacts:** [SAE + experiments](https://huggingface.co/09Catho/BrainPatch-Qwen2.5-1.5B) · [feature database](https://huggingface.co/datasets/09Catho/BrainPatch-Features-Qwen2.5-1.5B)
+
 ---
 
 ## Read this first

@@ -27,6 +27,39 @@ from modal_app.resources import VOL_MOUNT, app, cpu_kwargs
 EXCLUDED_PATTERNS = ("*.safetensors.tmp", "shard_*.safetensors", "hf-cache/*")
 
 
+@app.function(**cpu_kwargs(timeout=600))
+def sync_patches(patches: dict[str, str]) -> dict[str, Any]:
+    """Write patch JSON files from the repository onto the Volume.
+
+    Patches live in git (they are source, not artifacts), but the publishing
+    function reads everything it uploads from ``/vol``. Rather than baking the
+    directory into an image layer, the small JSON documents are passed in as
+    ``{filename: content}`` -- a few kilobytes, and no image rebuild.
+
+    Each file is validated before being written, so a malformed patch cannot
+    reach the Volume and from there a public repository.
+    """
+    from pathlib import Path
+
+    from brainpatch.schemas.patch import BrainPatchSpec
+
+    target = Path(VOL_MOUNT) / "patches"
+    target.mkdir(parents=True, exist_ok=True)
+
+    written: list[str] = []
+    for filename, content in patches.items():
+        spec = BrainPatchSpec.from_json(content)  # raises on anything malformed
+        (target / filename).write_text(content, encoding="utf-8")
+        written.append(f"{filename} -> {spec.summary()}")
+
+    from modal_app.resources import volume as _volume
+
+    _volume.commit()
+    result = {"ok": True, "written": written, "count": len(written)}
+    print(json.dumps(result, indent=2))
+    return result
+
+
 @app.function(**cpu_kwargs(timeout=60 * 30, secrets=True))
 def publish_to_huggingface(
     experiment: str = "smoke_v0",
