@@ -79,7 +79,7 @@ _ML_PACKAGES = (
 _WEB_PACKAGES = ("gradio==5.23.3", "fastapi==0.115.12")
 
 
-def _build(*packages: str) -> modal.Image:
+def _build(*packages: str, local_dirs: tuple[tuple[str, str], ...] = ()) -> modal.Image:
     """Assemble an image with local sources added LAST.
 
     Modal forbids any build step after ``add_local_*``, because local files are
@@ -87,13 +87,20 @@ def _build(*packages: str) -> modal.Image:
     image by appending ``pip_install`` to an existing one therefore fails at
     run time, not at import time -- so images are built from their package list
     here rather than by extending one another.
+
+    ``local_dirs`` are ``(local_path, remote_path)`` pairs attached after the
+    Python sources. Consecutive ``add_local_*`` calls are fine; only a *build*
+    step after one is forbidden.
     """
-    return (
+    image = (
         modal.Image.debian_slim(python_version=PYTHON_VERSION)
         .pip_install(*packages)
         .env(_SHARED_ENV)
         .add_local_python_source(*_LOCAL_SOURCES)
     )
+    for local_path, remote_path in local_dirs:
+        image = image.add_local_dir(local_path, remote_path=remote_path)
+    return image
 
 
 CPU_IMAGE = _build(*_CPU_PACKAGES)
@@ -103,6 +110,15 @@ ML_IMAGE = _build(*_ML_PACKAGES)
 #: real generation, so it needs torch; keeping it a separate image stops the UI
 #: dependencies from bloating every training container.
 WEB_IMAGE = _build(*_ML_PACKAGES, *_WEB_PACKAGES)
+
+#: Image for the remote pytest suite (``tests/remote/``). Carries the ML stack
+#: plus pytest, and mounts the test directory. CPU only -- the SAE regression
+#: tests need torch maths, not a GPU.
+TEST_IMAGE = _build(
+    *_ML_PACKAGES,
+    "pytest==8.3.5",
+    local_dirs=(("tests", "/root/tests"),),
+)
 
 
 def pinned_versions() -> dict[str, str]:

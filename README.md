@@ -200,6 +200,17 @@ brainpatch validate patches
 pytest
 ```
 
+The SAE maths tests need torch, so they live in `tests/remote/` and run inside a
+Modal CPU container instead — no GPU, no model, no Volume data:
+
+```bash
+modal run modal_app/app.py::sae_unit_tests
+```
+
+```bash
+modal run modal_app/app.py::audit_topk_liveness --experiment smoke_v0
+```
+
 ---
 
 ## Activation extraction
@@ -231,11 +242,13 @@ The literature commonly attributes such first-token outliers to attention-sink b
 
 ```
 z_pre = W_enc @ (x - b_dec) + b_enc
-z     = TopK(ReLU(z_pre))          # L0 is exactly k, by construction
+z     = TopK(ReLU(z_pre))          # L0 <= k  (see below)
 x_hat = W_dec @ z + b_dec
 ```
 
-**Why Top-K rather than an L1 penalty.** L1 needs a coefficient whose correct value depends on activation scale, and it shrinks every activation toward zero, biasing magnitudes. Top-K makes sparsity a hyperparameter instead of an outcome. Measured L0 was exactly 32.0.
+**Why Top-K rather than an L1 penalty.** L1 needs a coefficient whose correct value depends on activation scale, and it shrinks every activation toward zero, biasing magnitudes. Top-K makes sparsity a hyperparameter instead of an outcome.
+
+**L0 is bounded by `k`, not equal to it.** `torch.topk` always returns `k` indices, but the ReLU in front of it means a selected value can be zero — whenever a token has fewer than `k` positive pre-activations. Reconstruction is unaffected (zeros scatter into a zeros tensor), and the reported L0 correctly counts only positive entries. What this *did* break was liveness accounting, which counted selected indices rather than firings; see the research log. Measured L0 for `smoke_v0` was 32.0, and a full re-encode of the corpus found **0 zero-valued selections in 640,000**, so the bug never manifested in the published run.
 
 **Why unit-norm decoder columns.** Without the constraint, the network can halve every decoder column and double every activation at no cost to the loss. That is fatal for interventions specifically: a patch says "add strength 16 along feature 727's direction", and if the direction's length is arbitrary then so is the strength. Measured decoder norms after training: mean 1.0, min 0.9999992, max 1.0000007.
 
@@ -256,8 +269,15 @@ x_hat = W_dec @ z + b_dec
 | `none` | no description offered |
 | `correlational` | top-activating contexts look suggestive — nothing more |
 | `predictive` | activation predicts a behaviour on held-out data |
-| `interventional` | steering changes behaviour, controls not yet complete |
-| `causal` | steering changes behaviour **and** scale-matched controls do not |
+| `interventional` | steering changes behaviour; controls absent, incomplete, or not yet run |
+| `controlled_interventional` | steering changes behaviour **and** scale-matched controls did not, in one adequately-powered experiment |
+| `replicated` | that controlled result held up on independent repetition |
+
+The top rung is deliberately *not* called `causal`. An earlier version of this
+ladder used that word, and it claimed more than a single experiment can deliver:
+passing scale-matched controls once, on one model, at one layer, with one prompt
+set, is evidence *consistent with* a causal effect — not a demonstration of
+causation. The rungs now name what was done, not what one might infer from it.
 
 Only the validation pipeline writes anything above `correlational`, and it does so from measurements.
 
@@ -402,7 +422,7 @@ Every generation is stored. No filtering, no best-of, no cherry-picking.
 | Peak VRAM | **295.4 MB** |
 | Train | explained variance **0.762**, cosine 0.925, normalised MSE 0.145 |
 | Validation | explained variance **0.658**, cosine 0.890, normalised MSE 0.211 |
-| L0 | exactly 32.0 |
+| L0 | 32.0 measured (bound is `k`=32; 0 zero-valued selections in 640,000) |
 | Dead features | 0 of 2048 |
 | `input_scale` | 0.5610531069008018 |
 
@@ -410,16 +430,34 @@ The **0.104 train/validation gap in explained variance is real overfitting**, an
 
 ### Dose–response sweep (feature 727)
 
-| strength | delta norm | divergence from baseline | degenerate |
-|---|---|---|---|
-| 2 | 3.565 | 0.434 | no |
-| 4 | 7.129 | 0.443 | no |
-| 8 | 14.259 | 0.563 | no |
-| 16 | 28.518 | 0.770 | no |
-| 32 | 57.036 | 0.958 | **yes** (see note) |
-| 64 | 114.071 | 1.000 | **yes** |
+Run over **3 prompts**, 64 new tokens, greedy. Note the two columns measure
+different things — see the clarification below the table.
 
-Residual-stream L2 norm at layer 18 is roughly 70 in raw units, so strength 16 is a ~41% perturbation. Below strength 8 the greedy output was unchanged on the probe prompt.
+| strength | delta norm | mean divergence (3 prompts) | probe prompt (#0) | degenerate |
+|---|---|---|---|---|
+| 2 | 3.565 | 0.434 | **byte-identical to baseline** | no |
+| 4 | 7.129 | 0.443 | **byte-identical to baseline** | no |
+| 8 | 14.259 | 0.563 | changed | no |
+| 16 | 28.518 | 0.770 | changed, coherent | no |
+| 32 | 57.036 | 0.958 | changed, looping | **yes** (see note) |
+| 64 | 114.071 | 1.000 | collapsed | **yes** |
+
+Residual-stream L2 norm at layer 18 is roughly 70 in raw units, so strength 16
+is a ~41% perturbation.
+
+> **Clarifying an apparent contradiction.** The mean-divergence column is
+> averaged over **all three** sweep prompts. The "unchanged below strength 8"
+> observation refers only to **prompt #0** ("Explain in two sentences why the sky
+> appears blue"), which is the single prompt whose generations the sweep records
+> verbatim. At strengths 2 and 4 that prompt's output was byte-identical to
+> baseline, contributing exactly 0.000 divergence — while the 3-prompt mean was
+> still 0.434, because the other two prompts *did* change.
+>
+> Arithmetically that puts the other two prompts at roughly 0.65 mean divergence
+> at strength 2, where prompt #0 sat at zero. **Prompt sensitivity to a fixed
+> perturbation varies enormously**, which is a real limitation of reading any
+> single-prompt example as representative — and a reason the 6-prompt experiment
+> below is the one the conclusions rest on.
 
 > **Note on the strength-32 row.** The degeneration detector originally scored this as clean. The generation was `"as they encounter each other, as they interact with each other, as they collide, as they merge, ..."` — plainly looping, but each clause ends differently, so set-based diversity measures missed it. A `top_bigram_fraction` metric was added in response and now flags it (0.167 vs 0.028 for healthy text). The table reflects the corrected detector.
 
@@ -585,7 +623,8 @@ modal_app/               Modal orchestration (no module-scope torch)
 configs/                 extraction, sae, experiments (incl. serious_v1)
 examples/contrast/       synthetic development fixtures
 patches/                 honestly-named patch files
-tests/                   161 pure-Python tests, no network, no GPU
+tests/                   169 pure-Python tests, no network, no GPU
+└── remote/              15 SAE tests needing torch; run inside Modal only
 docs/                    format and methodology notes
 ```
 

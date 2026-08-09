@@ -210,25 +210,43 @@ Such first-token outliers are commonly attributed to attention-sink behaviour, w
 | Peak VRAM | 295.4 MB |
 | Train | explained variance **0.762**, cosine 0.925 |
 | Validation | explained variance **0.658**, cosine 0.890 |
-| L0 | exactly 32.0 |
+| L0 | 32.0 measured — see note below |
 | Dead features | 0 of 2048 |
 | Decoder norms | mean 1.0, min 0.9999992, max 1.0000007 |
 
 The **0.104 train/validation explained-variance gap is genuine overfitting.** 19,000 training rows against a 2048-feature dictionary is roughly 9 rows per feature. Zero dead features at this scale is not a sign of health either. `smoke_v0` exists to prove the pipeline, not to produce a good SAE.
 
+> **L0 is bounded by `k`, not identically `k`.** `torch.topk` always returns
+> `k` indices, but the ReLU in front of it means a selected value can be zero
+> whenever a token has fewer than `k` positive pre-activations. Reconstruction
+> is unaffected (zeros scatter into a zeros tensor) and reported L0 counts only
+> positive entries, so it is correct. Liveness accounting originally counted
+> *selected indices* rather than firings, which could have inflated
+> `fire_count` and hidden dead features; that is fixed, and a full re-encode of
+> the stored corpus found **0 zero-valued selections in 640,000**, so the
+> published `smoke_v0` numbers were never affected and are unchanged.
+
 ### Dose–response
 
-Residual-stream L2 norm at layer 18 is ~70 raw units.
+Residual-stream L2 norm at layer 18 is ~70 raw units. Sweep run over **3
+prompts**, 64 new tokens, greedy.
 
-| strength | delta norm | divergence from baseline | degenerate |
-|---|---|---|---|
-| 2 | 3.565 | 0.434 | no |
-| 8 | 14.259 | 0.563 | no |
-| 16 | 28.518 | 0.770 | no |
-| 32 | 57.036 | 0.958 | yes |
-| 64 | 114.071 | 1.000 | yes |
+| strength | delta norm | mean divergence (3 prompts) | probe prompt (#0) | degenerate |
+|---|---|---|---|---|
+| 2 | 3.565 | 0.434 | byte-identical to baseline | no |
+| 4 | 7.129 | 0.443 | byte-identical to baseline | no |
+| 8 | 14.259 | 0.563 | changed | no |
+| 16 | 28.518 | 0.770 | changed, coherent | no |
+| 32 | 57.036 | 0.958 | changed, looping | yes |
+| 64 | 114.071 | 1.000 | collapsed | yes |
 
-Below strength 8 the greedy output on the probe prompt was unchanged.
+**The two columns measure different things.** Mean divergence is averaged over
+all three sweep prompts; the "unchanged" observation refers only to prompt #0,
+the single prompt whose generations the sweep records verbatim. At strengths 2
+and 4 prompt #0 was byte-identical to baseline (0.000 divergence) while the
+3-prompt mean was 0.434 — the other two prompts changed substantially, at
+roughly 0.65 mean divergence. Prompt sensitivity to a fixed perturbation varies
+a great deal, so no single-prompt example should be read as representative.
 
 ### Intervention experiment — the headline
 
@@ -307,7 +325,14 @@ Maximum absolute error against the predicted schedule: **3.6 × 10⁻⁶**.
 | Feature 727's *direction* carries specific behavioural meaning | **Not supported.** Controls failed. |
 | Any feature here maps to a human concept | **Not tested, not claimed** |
 
-The evidence ladder used throughout: `none` → `correlational` → `predictive` → `interventional` → `causal`. Nothing advances past `correlational` automatically. Both published patches are `none`.
+The evidence ladder used throughout:
+
+`none` → `correlational` → `predictive` → `interventional` → `controlled_interventional` → `replicated`
+
+Nothing advances past `correlational` automatically. The top rung is
+deliberately not called `causal`: passing scale-matched controls once, on one
+model at one layer with one prompt set, is evidence *consistent with* a causal
+effect, not a demonstration of causation. **Both published patches are `none`.**
 
 ---
 

@@ -256,7 +256,9 @@ def train_sae(
                 grad_norm = torch.nn.utils.clip_grad_norm_(sae.parameters(), config.grad_clip)
                 optimizer.step()
                 sae.normalize_decoder()
-                sae.update_liveness(out.topk_indices, batch.shape[0])
+                # Values are required: a Top-K index whose value is zero is not
+                # a firing, and counting it would hide a dead feature.
+                sae.update_liveness(out.topk_indices, out.topk_values, batch.shape[0])
 
                 state.step += 1
                 state.tokens_seen += batch.shape[0]

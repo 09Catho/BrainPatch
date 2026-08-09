@@ -194,7 +194,9 @@ d_in 1536, d_sae 2048 (expansion 1.33×), k 32, 6,295,040 parameters.
 | cosine similarity | 0.925 | 0.890 |
 | normalised MSE | 0.145 | 0.211 |
 
-L0 exactly 32.0 (Top-K working as specified). **0 dead features of 2048.**
+Measured L0 32.0 -- note L0 is bounded above by `k`, not identically `k`; a
+later audit confirmed 0 zero-valued Top-K selections in this run. **0 dead
+features of 2048.**
 
 **Observation.** The 0.104 explained-variance gap between train and validation
 is genuine overfitting. 19,000 training rows against a 2048-feature dictionary
@@ -206,12 +208,16 @@ neither should be read as SAE quality.
 ### Dose-response sweep
 
 Strength is not something to guess: the right magnitude depends on the
-residual-stream norm at the hooked layer. Measured on feature 727, 3 prompts:
+residual-stream norm at the hooked layer. Measured on feature 727, 3 prompts,
+64 new tokens. The divergence column is the **3-prompt mean**; the note column
+describes **prompt #0 only**, the one whose generations the sweep records
+verbatim. Those are different measurements and the first write-up presented
+them adjacently without saying so.
 
-| strength | delta norm | divergence | note |
+| strength | delta norm | mean divergence (3 prompts) | prompt #0 |
 |---|---|---|---|
-| 2 | 3.565 | 0.434 | probe prompt output **unchanged** |
-| 4 | 7.129 | 0.443 | probe prompt output **unchanged** |
+| 2 | 3.565 | 0.434 | byte-identical to baseline |
+| 4 | 7.129 | 0.443 | byte-identical to baseline |
 | 8 | 14.259 | 0.563 | first wording change |
 | 16 | 28.518 | 0.770 | rewritten, coherent, still correct |
 | 32 | 57.036 | 0.958 | looping |
@@ -219,8 +225,21 @@ residual-stream norm at the hooked layer. Measured on feature 727, 3 prompts:
 
 Against a raw residual norm of ~70, strength 16 is a ~41% perturbation. The
 initial `intervention_smoke` at strength 2.0 produced **byte-identical** output
-to baseline — a 5% perturbation is simply too small to change greedy decoding.
-That is why the sweep exists rather than a guessed default.
+to baseline on that same prompt — a 5% perturbation is simply too small to
+change greedy decoding there. That is why the sweep exists rather than a
+guessed default.
+
+**Prompt sensitivity varies enormously, and the table half-hides it.** At
+strength 2 prompt #0 contributed exactly 0.000 divergence, yet the 3-prompt mean
+was 0.434. Arithmetically the other two prompts averaged about 0.65 — a large
+change — at the same perturbation that left prompt #0 untouched. So "below
+strength 8 the output was unchanged" is true of prompt #0 and false of the
+sweep as a whole. Both the README and the model card now label the aggregation
+explicitly, because side by side the two numbers read as a contradiction.
+
+This is also a caution about the sweep design: recording only
+``generations[0]`` makes the cheapest-to-read evidence the least
+representative.
 
 ### The degeneration detector was wrong, and was fixed
 
@@ -474,6 +493,113 @@ mentioned only as a plausible-but-unverified hypothesis.
 Both were inferences that ran ahead of the data. Recording them here because the
 same failure mode — a measurement quietly promoted into a mechanism — is exactly
 what the evidence ladder elsewhere in this project exists to prevent.
+
+---
+
+## Correctness pass: Top-K liveness accounting
+
+### The bug
+
+`torch.topk` always returns exactly `k` indices. Because the SAE applies ReLU
+*before* Top-K, some of those selected values can be zero whenever a token has
+fewer than `k` positive encoder pre-activations.
+
+`update_liveness` counted **every selected index** as a firing:
+
+```python
+fired[indices.reshape(-1)] = True                    # zero-valued ones included
+counts = torch.bincount(indices.reshape(-1), ...)    # zero-valued ones counted
+self.tokens_since_fired[fired] = 0                   # clock reset for non-firings
+```
+
+Consequences, in increasing severity:
+
+1. `fire_count` inflated by the number of zero-valued selections.
+2. `tokens_since_fired` reset for features that did not activate.
+3. Therefore `dead_mask()` under-reports dead features — **a permanently silent
+   feature that Top-K keeps padding into its selection would be reported alive
+   forever**, never flagged dead, and never revived by AuxK.
+
+(3) is the one that matters. The dead-feature mechanism exists precisely to
+catch features that stop firing, and this bug could blind it to exactly those.
+
+### Audit of what was and was not affected
+
+| Surface | Affected? | Why |
+|---|---|---|
+| `fire_count` buffer | yes, in principle | counted zero-valued selections |
+| `tokens_since_fired` / `dead_mask` | yes, in principle | clock reset by non-firings |
+| AuxK | indirectly | consumes `dead_mask`; its own zero-scatter is a numerical no-op |
+| reported `l0` | **no** | already computed as `feature_acts > 0`, which is correct |
+| reconstruction / loss | **no** | zeros scattered into a zeros tensor change nothing |
+| feature database (`features.jsonl`) | **no** | built from `acts > 0`, never from `update_liveness` |
+
+### Did it affect the persisted smoke_v0 run? No.
+
+Determined empirically by `audit_topk_liveness`, not by argument:
+
+```
+training evidence   89 logged steps, min l0 = max l0 = 32.0 = k
+corpus evidence     640,000 Top-K selections over all 20,000 stored activations
+                    zero-valued selections:            0
+                    rows with fewer than k positive:   0
+                    min positive selections in a row:  32
+verdict             NOT AFFECTED
+```
+
+Every Top-K selection in the run had a strictly positive value, so the buggy and
+fixed accounting produce **identical** numbers here. This is unsurprising at
+`d_sae=2048, k=32`: fewer than 32 of 2048 pre-activations would have to be
+positive, and roughly half are. **All published smoke_v0 metrics remain valid
+exactly as reported and none were changed.**
+
+The checkpoint's stored `fire_count` total equals `k × tokens_seen`
+(36,372,480 = 32 × 1,136,640). That is expected under the *old* code regardless,
+so it is not evidence either way — the corpus re-encode is what settles it.
+
+### The fix
+
+`update_liveness` now takes `values` alongside `indices` and filters on
+`values > 0`; passing the old single-argument form raises. `SAEOutput` gains
+`active_mask()` and `l0()`, and `reconstruction_metrics` now also reports
+`l0_min`, `l0_max` and `zero_selection_rate` — so if this condition ever does
+arise, it appears in the training log instead of having to be inferred.
+
+Docstrings claiming "exactly `k` non-zeros by construction" were wrong and are
+corrected to "at most `k`" throughout, including the README and model card. The
+*measured* L0 of exactly 32.0 stays, because it is a measurement.
+
+15 regression tests in `tests/remote/test_sae_liveness.py` pin the behaviour,
+driving the SAE into the fewer-than-k-positive regime deliberately (which needs
+a rigged encoder — it does not occur naturally at realistic width). They run
+inside Modal via `sae_unit_tests` because they need torch, which the local suite
+blocks by design.
+
+---
+
+## Correctness pass: evidence terminology
+
+The ladder's top rung was `causal`, defined as "steering changes behaviour and
+scale-matched controls do not". That definition describes an *experimental
+outcome*; the label asserts *causation*, which a single experiment on one model
+at one layer with one prompt set does not establish.
+
+Replaced with:
+
+```
+none → correlational → predictive → interventional
+     → controlled_interventional → replicated
+```
+
+`controlled_interventional` names what was actually done (controls ran and
+passed, with adequate power). `replicated` requires independent repetition.
+`is_validated` is now True only at `replicated`; `has_controlled_evidence`
+covers the top two rungs.
+
+**No patch was retroactively promoted.** Both published patches remain
+`evidence_level: none`, which is what their controls support — and `"causal"` is
+now rejected by schema validation, so old files naming it fail loudly rather
+than loading with a silently unrecognised label.
 
 ---
 

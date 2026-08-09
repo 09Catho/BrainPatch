@@ -126,6 +126,18 @@ modal run modal_app/app.py::dynamic_steering_demo --experiment smoke_v0 --streng
 modal run modal_app/app.py::volume_report
 ```
 
+The SAE regression tests need torch, which the local suite blocks, so they run
+remotely on CPU. `audit_topk_liveness` is a read-only check of persisted
+artifacts, not an experiment:
+
+```bash
+modal run modal_app/app.py::sae_unit_tests
+```
+
+```bash
+modal run modal_app/app.py::audit_topk_liveness --experiment smoke_v0
+```
+
 ```bash
 modal run modal_app/app.py::smoke_pipeline
 ```

@@ -103,8 +103,13 @@ The multiplier scales every `features[].strength` in the patch.
 | `none` | nothing |
 | `correlational` | top-activating contexts look suggestive |
 | `predictive` | activation predicts a behaviour on held-out data |
-| `interventional` | steering changes behaviour; controls incomplete |
-| `causal` | steering changes behaviour **and** scale-matched controls do not |
+| `interventional` | steering changes behaviour; controls absent, incomplete, or not yet run |
+| `controlled_interventional` | steering changes behaviour **and** scale-matched controls did not, in one adequately-powered experiment |
+| `replicated` | that controlled result held up on independent repetition |
+
+`spec.has_controlled_evidence` is True from `controlled_interventional` upward.
+`spec.is_validated` is True only at `replicated` — one passing controlled
+experiment is a result, not a validation.
 
 Nothing advances a patch past `correlational` automatically. Both patches
 shipped in this repository are `none`, because their controls came back

@@ -104,7 +104,7 @@ file the Parquet tables were built from.
 | | |
 |---|---|
 | Features | 2048 (d_in 1536, expansion 1.33×) |
-| Top-K | 32 (measured L0 exactly 32.0) |
+| Top-K | k=32 (measured L0 32.0; L0 is bounded by k, not equal to it) |
 | Tokens analysed | 20,000 |
 | Alive / dead | 2048 / 0 |
 | Mean firing rate (alive) | 0.015625 |

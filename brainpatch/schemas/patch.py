@@ -41,7 +41,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from brainpatch.schemas.feature import EVIDENCE_ORDER, EvidenceLevel
+from brainpatch.schemas.feature import CONTROLLED_LEVELS, EVIDENCE_ORDER, EvidenceLevel
 
 PATCH_FORMAT_VERSION = "0.1"
 
@@ -300,9 +300,18 @@ class BrainPatchSpec:
     # -- convenience -----------------------------------------------------------
 
     @property
+    def has_controlled_evidence(self) -> bool:
+        """True once scale-matched controls have been run and passed."""
+        return self.evidence_level in CONTROLLED_LEVELS
+
+    @property
     def is_validated(self) -> bool:
-        """True only when controlled causal evidence has been recorded."""
-        return self.evidence_level == "causal"
+        """True only for a controlled result that survived independent repetition.
+
+        One passing controlled experiment is ``controlled_interventional``. It
+        takes a replication to be called validated.
+        """
+        return self.evidence_level == "replicated"
 
     def summary(self) -> str:
         """One-line human summary that does not overstate evidence."""

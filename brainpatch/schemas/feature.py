@@ -9,9 +9,11 @@ Scientific note
 examples are correlational evidence and nothing more. The field
 :attr:`FeatureRecord.evidence_level` records how much support a semantic
 description actually has, and it never advances past ``"correlational"``
-automatically. Only an intervention experiment with controls can move a feature
-to ``"causal"``, and that transition is performed by the validation pipeline
-writing a result, never by a labelling heuristic.
+automatically. Only an intervention experiment with scale-matched controls can
+move a feature to ``"controlled_interventional"``, and only an independent
+repetition can move it to ``"replicated"``. Both transitions are performed by
+the validation pipeline writing a measured result, never by a labelling
+heuristic.
 """
 
 from __future__ import annotations
@@ -21,12 +23,29 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 #: Ordered strength of evidence behind a semantic claim about a feature.
+#:
+#: Deliberately conservative. An earlier version of this ladder topped out at
+#: ``causal``, which claimed more than a single controlled experiment can
+#: deliver: passing scale-matched controls once, on one model, at one layer,
+#: with one prompt set, is evidence *consistent with* a causal effect -- not a
+#: demonstration of causation. The top two rungs now name what was actually
+#: done (controls were run; the result was reproduced) rather than what one
+#: might wish to infer from it.
 EvidenceLevel = Literal[
-    "none",  # no description offered
-    "correlational",  # top-activating contexts look suggestive; nothing more
-    "predictive",  # feature activation predicts a behaviour on held-out data
-    "interventional",  # steering it changes behaviour, controls not yet complete
-    "causal",  # steering changes behaviour and scale-matched controls do not
+    # no description offered
+    "none",
+    # top-activating contexts look suggestive; nothing more
+    "correlational",
+    # feature activation predicts a behaviour on held-out data
+    "predictive",
+    # steering it changes behaviour; controls absent, incomplete, or not yet run
+    "interventional",
+    # steering changes behaviour AND scale-matched controls did not, in one
+    # experiment with adequate statistical power
+    "controlled_interventional",
+    # the controlled result held up on independent repetition -- a different
+    # prompt set, seed, or run
+    "replicated",
 ]
 
 EVIDENCE_ORDER: tuple[str, ...] = (
@@ -34,8 +53,12 @@ EVIDENCE_ORDER: tuple[str, ...] = (
     "correlational",
     "predictive",
     "interventional",
-    "causal",
+    "controlled_interventional",
+    "replicated",
 )
+
+#: Levels at which scale-matched controls have actually been run and passed.
+CONTROLLED_LEVELS: frozenset[str] = frozenset({"controlled_interventional", "replicated"})
 
 
 @dataclass
@@ -123,16 +146,25 @@ class FeatureRecord:
             self.evidence_level = "correlational"
 
     @property
+    def has_controlled_evidence(self) -> bool:
+        """True once scale-matched controls have been run and passed."""
+        return self.evidence_level in CONTROLLED_LEVELS
+
+    @property
     def is_validated(self) -> bool:
-        """True only when controlled intervention evidence exists."""
-        return self.evidence_level == "causal"
+        """True only for a controlled result that survived independent repetition.
+
+        Intentionally strict: one passing experiment is
+        ``controlled_interventional``, not validation.
+        """
+        return self.evidence_level == "replicated"
 
     def label_for_display(self) -> str:
         """Human-facing label that never overstates the evidence."""
         if self.hypothesis is None:
             return f"feature {self.feature_id} (no description)"
-        if self.evidence_level == "causal":
-            return f"feature {self.feature_id}: {self.hypothesis}"
+        if self.is_validated:
+            return f"feature {self.feature_id}: {self.hypothesis} [replicated]"
         return f"feature {self.feature_id}: {self.hypothesis} [{self.evidence_level}, unvalidated]"
 
     def to_dict(self) -> dict[str, Any]:

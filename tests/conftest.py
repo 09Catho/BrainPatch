@@ -6,12 +6,16 @@ job. The guard below enforces the first half of that: if a test (or something a
 test imports) reaches for the ML stack, it fails loudly rather than silently
 passing on a developer machine that happens to have torch installed.
 
-Remote tests are not pytest tests. They are explicit ``modal run`` commands,
-documented in the README, so that ``pytest`` can never spend money.
+``tests/remote/`` holds pytest files that legitimately need torch (SAE maths).
+They are excluded from local collection by ``collect_ignore_glob`` below and are
+executed inside a Modal CPU container via
+``modal run modal_app/app.py::sae_unit_tests``. They need no GPU and no model,
+so running them costs cents, but they must never run locally.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +24,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+#: Set to "1" only by the Modal runner in ``modal_app/sae_audit.py``. Opt-in
+#: rather than auto-detected: a local machine that happens to have torch
+#: installed must still get the local-only behaviour, and this whole file exists
+#: to stop that machine from silently passing tests it should not be running.
+REMOTE_MODE = os.environ.get("BRAINPATCH_REMOTE_TESTS") == "1"
+
+#: ``tests/remote/`` needs torch, so it is invisible to local collection.
+collect_ignore_glob = [] if REMOTE_MODE else ["remote/*"]
 
 #: Importing any of these from a local test is a bug, not a convenience.
 FORBIDDEN_TOP_LEVEL = frozenset(
@@ -42,7 +55,14 @@ class _HeavyImportBlocker:
 
 @pytest.fixture(scope="session", autouse=True)
 def _block_heavy_imports():
-    """Install the blocker for the whole session."""
+    """Install the blocker for the whole session, except in remote mode.
+
+    In remote mode the suite is running inside a Modal container where torch is
+    both present and required, so blocking it would be nonsense.
+    """
+    if REMOTE_MODE:
+        yield
+        return
     blocker = _HeavyImportBlocker()
     sys.meta_path.insert(0, blocker)
     yield

@@ -49,7 +49,10 @@ class SAEConfig:
     d_sae:
         Dictionary size (number of learned features).
     k:
-        Number of features kept active per token by the Top-K operator.
+        Upper bound on features kept active per token by the Top-K operator.
+        ``torch.topk`` always selects ``k`` indices, but the preceding ReLU can
+        make some of the selected values zero, so measured L0 is ``<= k`` rather
+        than identically ``k``.
     normalize_decoder:
         Constrain decoder columns to unit L2 norm after every optimizer step.
     tied_init:

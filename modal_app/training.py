@@ -23,6 +23,9 @@ def train_sae(
     epochs: int = 20,
     max_steps: int | None = None,
     auxk_alpha: float = 1.0 / 32.0,
+    # Exposed because SAEConfig requires auxk_k <= d_sae: a smaller dictionary
+    # cannot use the 256 default, and serious_v1.yaml specifies 512.
+    auxk_k: int = 256,
     dead_feature_window: int = 20_000,
     val_fraction: float = 0.05,
     seed: int = 0,
@@ -53,6 +56,7 @@ def train_sae(
         epochs=epochs,
         max_steps=max_steps,
         auxk_alpha=auxk_alpha,
+        auxk_k=auxk_k,
         dead_feature_window=dead_feature_window,
         val_fraction=val_fraction,
         seed=seed,

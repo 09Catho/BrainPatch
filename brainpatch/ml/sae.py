@@ -3,7 +3,7 @@
 Forward pass::
 
     z_pre = W_enc @ (x - b_dec) + b_enc
-    z     = TopK(ReLU(z_pre))          # exactly k non-zeros, by construction
+    z     = TopK(ReLU(z_pre))          # AT MOST k non-zeros -- see below
     x_hat = W_dec @ z + b_dec
 
 Design choices, and why each one is load-bearing for *intervention* rather than
@@ -12,8 +12,18 @@ just for reconstruction quality:
 **Top-K instead of an L1 penalty.**
     L1 sparsity requires tuning a coefficient whose right value depends on the
     activation scale, and it shrinks every activation toward zero, biasing
-    magnitudes. Top-K fixes L0 exactly at ``k``, so sparsity is a
-    hyperparameter rather than an outcome, and activations are unbiased.
+    magnitudes. Top-K caps L0 at ``k``, so sparsity is a hyperparameter rather
+    than an outcome, and activations are unbiased.
+
+**L0 is an upper bound, not an identity.**
+    ``torch.topk`` always returns exactly ``k`` indices, but the ReLU in front
+    of it means some of the selected *values* can be zero -- whenever fewer
+    than ``k`` encoder pre-activations are positive for a token. Those entries
+    scatter zeros into the sparse tensor, so the reconstruction is correct and
+    the measured L0 (counted as ``feature_acts > 0``) correctly falls below
+    ``k``. What is *not* correct is treating a selected index as evidence the
+    feature fired: see :meth:`TopKSAE.update_liveness`, which filters on the
+    value rather than the index.
 
 **Pre-encoder bias subtraction (``x - b_dec``).**
     Centres the input on the decoder's own bias so the dictionary models
@@ -58,13 +68,30 @@ class SAEOutput:
 
     reconstruction: torch.Tensor
     feature_acts: torch.Tensor
-    """Sparse activations, ``[batch, d_sae]``, exactly ``k`` non-zero per row."""
+    """Sparse activations, ``[batch, d_sae]``, **at most** ``k`` non-zero per row.
+
+    Fewer than ``k`` when a token has fewer than ``k`` positive encoder
+    pre-activations. This is the tensor to count L0 from.
+    """
     topk_indices: torch.Tensor
-    """``[batch, k]`` indices of the active features."""
+    """``[batch, k]`` indices returned by ``torch.topk``.
+
+    Always exactly ``k`` wide. An index appearing here does **not** mean the
+    feature fired -- pair it with :attr:`topk_values` and require a strictly
+    positive value.
+    """
     topk_values: torch.Tensor
-    """``[batch, k]`` their activation values."""
+    """``[batch, k]`` selected values. Non-negative, and **may contain zeros**."""
     pre_acts: torch.Tensor
-    """Dense pre-TopK activations, needed by AuxK."""
+    """Dense post-ReLU, pre-TopK activations, needed by AuxK."""
+
+    def active_mask(self) -> torch.Tensor:
+        """``[batch, k]`` boolean: which Top-K selections actually fired."""
+        return self.topk_values > 0
+
+    def l0(self) -> torch.Tensor:
+        """Per-row count of strictly positive feature activations."""
+        return (self.feature_acts > 0).sum(dim=-1)
 
 
 class TopKSAE(nn.Module):
@@ -196,18 +223,56 @@ class TopKSAE(nn.Module):
     # -- liveness --------------------------------------------------------------
 
     @torch.no_grad()
-    def update_liveness(self, indices: torch.Tensor, batch_tokens: int) -> None:
-        """Update fire counts and the dead-feature clock."""
-        fired = torch.zeros(self.d_sae, dtype=torch.bool, device=indices.device)
-        fired[indices.reshape(-1)] = True
-        counts = torch.bincount(indices.reshape(-1), minlength=self.d_sae)
+    def update_liveness(
+        self,
+        indices: torch.Tensor,
+        values: torch.Tensor,
+        batch_tokens: int,
+    ) -> None:
+        """Update fire counts and the dead-feature clock.
+
+        Only selections with a **strictly positive** value count as firings.
+
+        ``torch.topk`` always returns ``k`` indices, but the ReLU in front of it
+        means those can include zero-valued entries whenever a token has fewer
+        than ``k`` positive pre-activations. Counting the raw indices would
+        inflate :attr:`fire_count`, and -- worse -- would reset
+        :attr:`tokens_since_fired` for a feature that did not fire, hiding it
+        from :meth:`dead_mask` and therefore from AuxK revival. A permanently
+        silent feature could then be reported alive forever.
+
+        Parameters
+        ----------
+        indices, values:
+            ``SAEOutput.topk_indices`` and ``SAEOutput.topk_values``, same shape.
+        batch_tokens:
+            Rows in this batch; advances the dead-feature clock.
+        """
+        if indices.shape != values.shape:
+            raise ValueError(
+                f"indices and values must have the same shape, got "
+                f"{tuple(indices.shape)} and {tuple(values.shape)}"
+            )
+
+        active = indices.reshape(-1)[values.reshape(-1) > 0]
+
+        counts = torch.bincount(active, minlength=self.d_sae)
         self.fire_count += counts.to(self.fire_count.dtype)
+
         self.tokens_since_fired += batch_tokens
-        self.tokens_since_fired[fired] = 0
+        if active.numel() > 0:
+            fired = torch.zeros(self.d_sae, dtype=torch.bool, device=indices.device)
+            fired[active] = True
+            self.tokens_since_fired[fired] = 0
+
         self.tokens_seen += batch_tokens
 
     def dead_mask(self) -> torch.Tensor:
-        """Boolean mask of features silent for longer than the dead window."""
+        """Boolean mask of features silent for longer than the dead window.
+
+        "Silent" means no strictly positive activation, not merely "not selected
+        by Top-K" -- see :meth:`update_liveness`.
+        """
         return self.tokens_since_fired > self.config.dead_feature_window
 
     def num_dead(self) -> int:
@@ -234,6 +299,10 @@ class TopKSAE(nn.Module):
         masked_pre = out.pre_acts.masked_fill(~dead.unsqueeze(0), 0.0)
         values, indices = torch.topk(masked_pre, k_aux, dim=-1)
         sparse = torch.zeros_like(masked_pre)
+        # Zero-valued selections are harmless here: scattering 0.0 into a zeros
+        # tensor is a no-op and contributes nothing to the linear map below. The
+        # zero-selection hazard is confined to liveness accounting, which counts
+        # occurrences rather than summing values.
         sparse.scatter_(-1, indices, values)
 
         aux_reconstruction = F.linear(sparse, self.W_dec)  # no bias: modelling the residual
@@ -261,6 +330,15 @@ def reconstruction_metrics(x: torch.Tensor, out: SAEOutput) -> dict[str, float]:
     ``explained_variance`` is computed against the per-dimension variance of the
     batch, i.e. ``1 - Var(x - x_hat) / Var(x)``. It can go negative for a
     freshly initialised SAE, which is meaningful and not clipped away.
+
+    ``l0`` counts strictly positive entries of ``feature_acts``, so it is the
+    *true* mean L0 and is bounded above by ``k`` rather than equal to it. A
+    reported ``l0`` below ``k`` means some tokens had fewer than ``k`` positive
+    encoder pre-activations, which is legitimate and worth noticing.
+
+    ``mean_active_value`` averages over strictly positive selections only;
+    including zero-valued Top-K entries would bias it toward zero exactly when
+    the SAE is sparsest.
     """
     with torch.no_grad():
         x = x.float()
@@ -275,7 +353,20 @@ def reconstruction_metrics(x: torch.Tensor, out: SAEOutput) -> dict[str, float]:
         x_norm = x.norm(dim=-1)
         cos = F.cosine_similarity(x, recon, dim=-1).mean().item()
 
-        l0 = (out.feature_acts > 0).float().sum(dim=-1).mean().item()
+        # True L0: strictly positive activations, bounded above by k.
+        l0_per_row = out.l0().float()
+        l0 = l0_per_row.mean().item()
+
+        # Fraction of Top-K slots that selected a zero. Non-zero here means the
+        # dictionary is saturating below k for some tokens; it is also the
+        # condition under which naive index-based liveness accounting would be
+        # wrong, so it is worth logging rather than inferring.
+        active = out.active_mask()
+        zero_selection_rate = 1.0 - active.float().mean().item()
+        positive_values = out.topk_values[active]
+        mean_active_value = (
+            positive_values.mean().item() if positive_values.numel() > 0 else 0.0
+        )
 
         return {
             "mse": mse,
@@ -283,7 +374,10 @@ def reconstruction_metrics(x: torch.Tensor, out: SAEOutput) -> dict[str, float]:
             "explained_variance": explained,
             "cosine_similarity": cos,
             "l0": l0,
+            "l0_min": l0_per_row.min().item(),
+            "l0_max": l0_per_row.max().item(),
+            "zero_selection_rate": zero_selection_rate,
             "mean_input_norm": x_norm.mean().item(),
             "mean_recon_norm": recon.norm(dim=-1).mean().item(),
-            "mean_active_value": out.topk_values.mean().item(),
+            "mean_active_value": mean_active_value,
         }

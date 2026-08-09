@@ -37,12 +37,14 @@ from modal_app.model_cache import cache_model, model_architecture, verify_cached
 from modal_app.dataset_release import build_dataset_tables, publish_dataset_release
 from modal_app.publish import publish_to_huggingface, sync_patches
 from modal_app.resources import app
+from modal_app.sae_audit import audit_topk_liveness, sae_unit_tests
 from modal_app.training import train_sae
 from modal_app.web import serve_demo
 
 __all__ = [
     "analyze_features",
     "app",
+    "audit_topk_liveness",
     "build_dataset_tables",
     "cache_model",
     "cpu_smoke",
@@ -55,6 +57,7 @@ __all__ = [
     "publish_dataset_release",
     "publish_release",
     "publish_to_huggingface",
+    "sae_unit_tests",
     "serve_demo",
     "sync_patches",
     "smoke_pipeline",

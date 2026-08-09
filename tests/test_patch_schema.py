@@ -211,6 +211,7 @@ def test_revision_mismatch_tolerated_by_default_but_refused_when_strict():
 
 def test_default_patch_is_not_validated():
     assert _spec().is_validated is False
+    assert _spec().has_controlled_evidence is False
 
 
 def test_summary_marks_unvalidated_patches():
@@ -218,4 +219,42 @@ def test_summary_marks_unvalidated_patches():
 
 
 def test_summary_does_not_mark_validated_patches():
-    assert "unvalidated" not in _spec(evidence_level="causal").summary()
+    assert "unvalidated" not in _spec(evidence_level="replicated").summary()
+
+
+def test_causal_is_no_longer_an_accepted_evidence_level(valid_patch_dict):
+    """The old top rung claimed more than one experiment can establish."""
+    valid_patch_dict["evidence_level"] = "causal"
+    with pytest.raises(PatchValidationError, match="evidence_level"):
+        BrainPatchSpec.from_dict(valid_patch_dict)
+
+
+@pytest.mark.parametrize(
+    "level,controlled,validated",
+    [
+        ("none", False, False),
+        ("correlational", False, False),
+        ("predictive", False, False),
+        ("interventional", False, False),
+        ("controlled_interventional", True, False),
+        ("replicated", True, True),
+    ],
+)
+def test_evidence_ladder_thresholds(level, controlled, validated):
+    """One passing controlled experiment is a result, not a validation."""
+    spec = _spec(evidence_level=level)
+    assert spec.has_controlled_evidence is controlled
+    assert spec.is_validated is validated
+
+
+def test_evidence_order_is_the_documented_ladder():
+    from brainpatch.schemas.feature import EVIDENCE_ORDER
+
+    assert EVIDENCE_ORDER == (
+        "none",
+        "correlational",
+        "predictive",
+        "interventional",
+        "controlled_interventional",
+        "replicated",
+    )
