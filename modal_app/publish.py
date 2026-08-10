@@ -202,6 +202,11 @@ def publish_to_huggingface(
         repo_id=target,
         repo_type="model",
         commit_message=f"BrainPatch {experiment}: SAE, feature database, experiment artifacts",
+        # Remove the pre-v1 flat patch layout. Patches now live under
+        # patches/research/ and patches/runtime/; leaving copies at the old
+        # top-level paths would offer the same file twice with no way to tell
+        # which one a user needs.
+        delete_patterns=["patches/*.json"],
     )
     shutil.rmtree(staging, ignore_errors=True)
 
