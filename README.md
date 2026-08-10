@@ -85,16 +85,29 @@ brainpatch backends    # full capability matrix
 
 ## Supported backends
 
-| Backend | Status | Static | Schedules | Server | Notes |
+| Backend | Status | Static | Schedules | Server | Verified against |
 |---|---|---|---|---|---|
-| **Transformers** | **verified** on Qwen2.5-1.5B / L4 | ✅ | ✅ | ✅ | reference backend; CUDA, CPU, MPS |
-| **llama.cpp** | implemented, not hardware-verified | ✅ | ❌ | ✅ | via upstream control vectors |
-| **vLLM** | implemented, not hardware-verified | ✅ | ❌ | ✅ | hooks inside vLLM's own forward pass |
-| **MLX-LM** | experimental, never run on Apple Silicon | ✅ | ❌ | ❌ | no Apple hardware was available |
+| **Transformers** | **verified** | ✅ | ✅ | ✅ | Qwen2.5-1.5B bf16, NVIDIA L4 |
+| **llama.cpp** | **verified** | ✅ | ❌ | ✅ | upstream **b10344**, **Q4_K_M** GGUF |
+| **vLLM** | **verified** | ✅ | ❌ | ✅ | **vLLM 0.11.0**, L4, OpenAI server |
+| **MLX-LM** | experimental | ✅ | ❌ | ❌ | never run on Apple Silicon |
 
 "Verified" means an automated acceptance suite ran against a real model and
 passed. "Implemented" means the adapter is written and reviewed but no hardware
 has confirmed it. We do not use the word "supported" for the latter.
+
+What "verified" cost, concretely — each backend ran an automated acceptance
+suite against a real model:
+
+- **Transformers**: weights provably unchanged, `strength=0` byte-identical to
+  baseline, measured delta norm **28.5177 == expected 28.5177**, schedules fire
+  at the keyframe, disable/remove restore baseline.
+- **llama.cpp**: 0-based BrainPatch layer 18 maps to the `direction.19` tensor
+  (1-based), scale-0 output character-identical to baseline, non-zero scale
+  changes output, no crash — on a real 1.12 GB Q4_K_M GGUF.
+- **vLLM**: hooks confirmed **inside the worker process** (`Qwen2ForCausalLM`,
+  28 layers, `active_hooks: 1`, `cuda:0`), OpenAI server serves concurrent
+  requests with no state leak, mismatched per-request strength rejected 400.
 
 Capability gaps are real, not oversights:
 
@@ -104,6 +117,9 @@ Capability gaps are real, not oversights:
   pass serves many sequences, so a per-request coefficient would change *other
   users'* output. Patch state is frozen while serving, which is what makes
   concurrency safe.
+- **Quantization is not assumed to transfer.** A direction fitted on bf16 was
+  checked to still change output at Q4_K_M; whether it produces the *same*
+  behavioural effect at 4-bit is untested.
 
 ## CLI
 

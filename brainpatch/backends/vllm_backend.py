@@ -1,28 +1,34 @@
 """vLLM backend.
 
-What this actually does, precisely
-----------------------------------
-It loads the model **through vLLM** and registers forward hooks on the decoder
-blocks of the model object vLLM itself instantiated. The intervention therefore
-runs inside vLLM's own forward pass, under vLLM's scheduler, batching and KV
-cache. It does **not** launch a shadow Transformers model and pretend -- that
-would make "verified on vLLM" a false statement.
+How the intervention reaches vLLM
+---------------------------------
+vLLM's V1 engine runs the model in a **separate worker process**, so reaching it
+by walking attributes off the ``LLM`` object does not work -- the model simply
+is not in the caller's address space. The supported way in is
+``worker_extension_cls`` plus ``LLM.collective_rpc``: vLLM mixes
+:class:`~brainpatch.backends.vllm_worker.BrainPatchWorkerExtension` into every
+worker, and the RPC then invokes its methods **by name**.
 
-The honest caveat: reaching the model object requires vLLM internals
-(``llm_engine.model_executor.driver_worker.model_runner.model``). vLLM does not
-currently expose a public activation-hook API, so this path is version-sensitive
-and is probed defensively at load time with a clear error if the internals move.
-That is a real fragility and is documented rather than hidden.
+Calling by name matters. V1's RPC channel serializes with msgpack and refuses to
+ship a callable, suggesting ``VLLM_ALLOW_INSECURE_SERIALIZATION=1`` instead --
+which would turn the engine's control channel into an arbitrary-code path for
+our convenience. The extension class avoids that entirely.
+
+The consequence is that the intervention genuinely runs inside vLLM's forward
+pass, under its scheduler, batching and KV cache. There is no shadow
+Transformers model anywhere in this file.
+
+The RPC payload is a plain ``{layer: [floats]}`` map of *already-scaled* deltas.
+That suffices precisely because this backend supports neither token schedules
+nor per-request strength, so the delta is constant for a whole forward pass.
 
 Request isolation
 -----------------
-Patch state is **immutable while serving**. Strength is fixed when the engine is
-configured, so every request in a batch sees identical model behaviour and no
-state can leak between concurrent users. Per-request strength is deliberately
-*not* offered: with continuous batching, requests share one forward pass, so a
-per-request coefficient would require per-sequence scaling inside the hook and
-vLLM exposes no supported way to attribute rows of a batch to requests. Claiming
-it without that would be a correctness bug affecting other users' outputs.
+Patch state is fixed while serving. With continuous batching one forward pass
+serves many sequences, so a per-request coefficient would alter *other users'*
+output; the backend therefore refuses to mutate patches mid-serve rather than
+offering an unsafe knob. Two concurrent requests provably see identical model
+behaviour, which is what the integration test checks.
 """
 
 from __future__ import annotations
@@ -34,14 +40,8 @@ from brainpatch.patch.validation import ModelDescriptor
 from brainpatch.runtime.base import BrainPatchBackend, GenerationConfig
 from brainpatch.runtime.capabilities import Capabilities
 
-#: Internal paths tried, in order, to reach the torch model vLLM loaded.
-_MODEL_PATHS = (
-    "llm_engine.model_executor.driver_worker.model_runner.model",
-    "llm_engine.model_executor.driver_worker.worker.model_runner.model",
-    "llm_engine.model_executor.driver_worker.model_runner.model.model",
-)
-
-_LAYER_PATHS = ("model.layers", "layers", "transformer.h", "model.decoder.layers")
+#: Import path vLLM loads into each worker process.
+WORKER_EXTENSION = "brainpatch.backends.vllm_worker.BrainPatchWorkerExtension"
 
 
 class VLLMBackend(BrainPatchBackend):
@@ -54,11 +54,9 @@ class VLLMBackend(BrainPatchBackend):
         self.llm: Any = None
         self.model_id: str = ""
         self.revision: str | None = None
-        self._torch_model: Any = None
-        self._handles: list[Any] = []
-        self._vector_cache: dict[tuple[str, str], Any] = {}
-        self._config: Any = None
-        #: Guards patch mutation against in-flight requests.
+        self.vllm_version: str = ""
+        self._geometry: dict[str, Any] = {}
+        self._last_rpc: list[dict[str, Any]] = []
         self._lock = threading.RLock()
         self._serving = False
 
@@ -95,21 +93,20 @@ class VLLMBackend(BrainPatchBackend):
             quantization=(),
             notes={
                 "dynamic_schedule": (
-                    "Continuous batching means one forward pass serves many sequences "
-                    "at different generation positions, so a single token index is not "
+                    "Continuous batching means one forward pass serves sequences at "
+                    "different generation positions, so a single token index is not "
                     "well defined. Use the transformers backend for schedules."
                 ),
                 "per_request_strength": (
-                    "Patch state is fixed at engine configuration time so concurrent "
-                    "requests cannot affect each other. Per-request strength would "
-                    "need per-sequence scaling inside the batched forward pass, which "
-                    "vLLM exposes no supported way to attribute."
+                    "Would require per-sequence scaling inside a batched forward pass; "
+                    "vLLM exposes no supported way to attribute rows of a batch to "
+                    "requests, so offering it would corrupt other users' output."
                 ),
                 "concurrent_requests": (
                     "Safe because patch state is immutable while serving; mutation "
                     "raises if attempted mid-serve."
                 ),
-                "cpu": "vLLM requires a CUDA device for the supported path here.",
+                "cpu": "This backend requires a CUDA device.",
             },
         )
 
@@ -121,22 +118,29 @@ class VLLMBackend(BrainPatchBackend):
         *,
         revision: str | None = None,
         dtype: str = "auto",
-        gpu_memory_utilization: float = 0.85,
-        max_model_len: int | None = None,
+        gpu_memory_utilization: float = 0.80,
+        max_model_len: int | None = 2048,
         enforce_eager: bool = True,
         **kwargs: Any,
     ) -> None:
-        """Load through vLLM and locate the decoder blocks it instantiated.
+        """Load through vLLM.
 
         ``enforce_eager=True`` by default: CUDA graph capture replays a recorded
-        graph, and a Python forward hook added afterwards would not participate.
-        Eager mode costs some throughput and is what makes the intervention
-        actually run. Override only if you have verified hook execution.
+        graph, and a Python forward hook registered afterwards would not
+        participate. Eager costs throughput and is what makes the intervention
+        actually execute. Do not disable it without re-verifying that hooks run.
         """
+        import vllm
         from vllm import LLM
 
+        self.vllm_version = vllm.__version__
+        # Supported extension point: vLLM mixes this class into each worker, so
+        # collective_rpc can call its methods BY NAME with msgpack-safe args.
+        # Passing a callable instead would require
+        # VLLM_ALLOW_INSECURE_SERIALIZATION=1, which we deliberately do not use.
         self.llm = LLM(
             model=model,
+            worker_extension_cls=WORKER_EXTENSION,
             revision=revision,
             dtype=dtype,
             gpu_memory_utilization=gpu_memory_utilization,
@@ -146,73 +150,46 @@ class VLLMBackend(BrainPatchBackend):
         )
         self.model_id = model
         self.revision = revision
-        self._torch_model = self._locate_model()
-        self._config = getattr(self._torch_model, "config", None)
-        self._install_hooks()
+        self._geometry = self._rpc("bp_probe")[0]
 
-    def _locate_model(self) -> Any:
-        """Reach vLLM's instantiated torch model, with a clear error if moved."""
-        tried: list[str] = []
-        for path in _MODEL_PATHS:
-            node: Any = self.llm
-            ok = True
-            for part in path.split("."):
-                node = getattr(node, part, None)
-                if node is None:
-                    ok = False
-                    break
-            tried.append(path)
-            if ok and node is not None:
-                return node
-        raise RuntimeError(
-            "could not reach vLLM's internal model object. vLLM does not expose a "
-            "public activation-hook API, so this backend depends on internals that "
-            f"appear to have changed in this version. Tried: {tried}"
-        )
-
-    def _decoder_layers(self) -> Any:
-        import torch.nn as nn
-
-        for path in _LAYER_PATHS:
-            node: Any = self._torch_model
-            for part in path.split("."):
-                node = getattr(node, part, None)
-                if node is None:
-                    break
-            if isinstance(node, nn.ModuleList) and len(node) > 0:
-                return node
-        raise RuntimeError(
-            f"could not locate decoder blocks on vLLM model {type(self._torch_model).__name__}"
-        )
+    def _rpc(self, method: str, *args: Any) -> list[dict[str, Any]]:
+        """Call a worker-extension method by name in every vLLM worker."""
+        if self.llm is None:
+            raise RuntimeError("no model loaded; call load_model() first")
+        rpc = getattr(self.llm, "collective_rpc", None)
+        if rpc is None:
+            raise RuntimeError(
+                f"vLLM {self.vllm_version} has no LLM.collective_rpc, which this "
+                "backend needs to reach the worker process. Supported: vLLM with "
+                "collective_rpc and worker_extension_cls (verified on 0.11.0)."
+            )
+        return list(rpc(method, args=args) if args else rpc(method))
 
     def describe_model(self) -> ModelDescriptor:
         if self.llm is None:
             raise RuntimeError("no model loaded; call load_model() first")
-        config = self._config
-        hidden = int(getattr(config, "hidden_size", 0)) if config else 0
-        archs = list(getattr(config, "architectures", []) or []) if config else []
+        geometry = self._geometry
+        archs = geometry.get("architectures") or []
         return ModelDescriptor(
             model_id=self.model_id,
-            hidden_size=hidden,
-            num_layers=len(self._decoder_layers()),
-            architecture=archs[0] if archs else type(self._torch_model).__name__,
+            hidden_size=int(geometry.get("hidden_size", 0)),
+            num_layers=int(geometry.get("num_layers", 0)),
+            architecture=archs[0] if archs else geometry.get("model_class", ""),
             revision=self.revision,
         )
 
     # -- intervention ----------------------------------------------------------
 
-    def _tensor_for(self, patch_name: str, key: str) -> Any:
-        cache_key = (patch_name, key)
-        cached = self._vector_cache.get(cache_key)
-        if cached is None:
-            import torch
-
-            device = next(self._torch_model.parameters()).device
-            cached = torch.tensor(
-                self.vector_values(patch_name, key), dtype=torch.float32, device=device
-            )
-            self._vector_cache[cache_key] = cached
-        return cached
+    def _deltas_by_layer(self) -> dict[int, list[float]]:
+        """Collapse all enabled patches into one already-scaled vector per layer."""
+        hidden = int(self._geometry.get("hidden_size", 0))
+        deltas: dict[int, list[float]] = {}
+        for edit in self.resolve_edits(0):
+            values = self.vector_values(edit.patch_name, edit.vector_key)
+            acc = deltas.setdefault(edit.layer, [0.0] * (hidden or len(values)))
+            for i, value in enumerate(values):
+                acc[i] += value * edit.coefficient
+        return deltas
 
     def _on_patches_changed(self) -> None:
         if self._serving:
@@ -221,70 +198,48 @@ class VLLMBackend(BrainPatchBackend):
                 "in-flight batched requests would observe an inconsistent model. "
                 "Restart the server to change patches."
             )
-        self._vector_cache.clear()
-        if self.llm is not None:
-            self._install_hooks()
-
-    def _install_hooks(self) -> None:
-        """One hook per patched layer, applied to every position in the batch."""
-        self._remove_hooks()
-        if self._torch_model is None:
+        if self.llm is None:
             return
-        layers = self._decoder_layers()
-        for layer_index in sorted(
-            {i.layer for p in self.patches.values() for i in p.manifest.interventions}
-        ):
-            if layer_index >= len(layers):
-                continue
-            self._handles.append(
-                layers[layer_index].register_forward_hook(self._make_hook(layer_index))
-            )
+        self._last_rpc = self._rpc("bp_apply_deltas", self._deltas_by_layer())
 
-    def _make_hook(self, layer_index: int) -> Any:
-        def hook(module: Any, args: Any, output: Any) -> Any:
-            # token_index 0: schedules are unsupported here, so the coefficient
-            # is constant for every position in the batch. That constancy is
-            # exactly what makes concurrent batching safe.
-            edits = self.resolve_edits(0, layer=layer_index)
-            if not edits:
-                return output
+    @property
+    def last_hook_report(self) -> list[dict[str, Any]]:
+        """What the workers reported after the last hook installation.
 
-            import torch
+        Exposed so an integration test can *prove* the hooks landed inside vLLM
+        rather than inferring it from output changes.
+        """
+        return list(self._last_rpc)
 
-            delta: Any = None
-            for edit in edits:
-                contribution = self._tensor_for(edit.patch_name, edit.vector_key) * edit.coefficient
-                delta = contribution if delta is None else delta + contribution
-
-            if isinstance(output, tuple):
-                hidden = output[0]
-                if not isinstance(hidden, torch.Tensor):
-                    return output
-                return (hidden + delta.to(hidden.dtype), *output[1:])
-            if isinstance(output, torch.Tensor):
-                return output + delta.to(output.dtype)
-            return output
-
-        return hook
-
-    def _remove_hooks(self) -> None:
-        for handle in self._handles:
-            handle.remove()
-        self._handles.clear()
+    def worker_state(self) -> list[dict[str, Any]]:
+        """Live probe of every worker, including active hook count."""
+        return self._rpc("bp_probe")
 
     # -- generation ------------------------------------------------------------
 
-    def generate(
-        self, prompt: str, config: GenerationConfig | None = None, **kwargs: Any
-    ) -> str:
-        results = self.generate_batch([prompt], config, **kwargs)
-        return results[0]
+    def generate(self, prompt: str, config: GenerationConfig | None = None, **kwargs: Any) -> str:
+        return self.generate_batch([prompt], config, **kwargs)[0]
 
     def generate_batch(
-        self, prompts: list[str], config: GenerationConfig | None = None, **kwargs: Any
+        self,
+        prompts: list[str],
+        config: GenerationConfig | None = None,
+        *,
+        use_chat_template: bool = True,
+        system: str | None = None,
+        **kwargs: Any,
     ) -> list[str]:
-        """Batched generation -- the reason to use vLLM at all."""
+        """Batched generation -- the reason to use vLLM at all.
+
+        ``system`` and ``use_chat_template`` are part of the cross-backend
+        generate() contract, so they are consumed here rather than forwarded:
+        passing them through to ``llm.generate`` raises a TypeError, which is
+        how the OpenAI server first failed against this backend.
+        """
         from vllm import SamplingParams
+
+        # Only vLLM's own arguments may reach it.
+        kwargs.pop("apply_to_prompt", None)
 
         if self.llm is None:
             raise RuntimeError("no model loaded; call load_model() first")
@@ -298,15 +253,30 @@ class VLLMBackend(BrainPatchBackend):
             seed=cfg.seed if cfg.do_sample else None,
             stop=cfg.stop or None,
         )
+        rendered = (
+            [self._render(p, system) for p in prompts] if use_chat_template else list(prompts)
+        )
         with self._lock:
-            outputs = self.llm.generate(prompts, params, **kwargs)
+            outputs = self.llm.generate(rendered, params, **kwargs)
         return [o.outputs[0].text for o in outputs]
+
+    def _render(self, prompt: str, system: str | None = None) -> str:
+        tokenizer = self.llm.get_tokenizer()
+        if getattr(tokenizer, "chat_template", None) is None:
+            return prompt
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
 
     def stream(
         self, prompt: str, config: GenerationConfig | None = None, **kwargs: Any
     ) -> Iterator[str]:
         self.capabilities().require("streaming")
-        yield self.generate(prompt, config, **kwargs)  # pragma: no cover
+        yield ""  # pragma: no cover - unreachable; require() raises
 
     # -- serving ---------------------------------------------------------------
 
@@ -318,10 +288,12 @@ class VLLMBackend(BrainPatchBackend):
         self._serving = False
 
     def unload(self) -> None:
-        self._remove_hooks()
-        self._vector_cache.clear()
+        if self.llm is not None:
+            try:
+                self._rpc("bp_apply_deltas", {})
+            except Exception:  # noqa: BLE001 - teardown must not mask a real error
+                pass
         self.llm = None
-        self._torch_model = None
 
 
 BACKEND = VLLMBackend

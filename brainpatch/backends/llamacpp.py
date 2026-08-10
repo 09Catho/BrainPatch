@@ -6,7 +6,7 @@ llama.cpp already implements exactly the operation a BrainPatch performs: add a
 per-layer direction to the residual stream. It exposes this as *control
 vectors*, with CLI flags on ``llama-cli`` and ``llama-server``::
 
-    --control-vector-scaled FILE SCALE
+    --control-vector-scaled FNAME:SCALE
     --control-vector-layer-range START END
 
 So this backend does **not** fork llama.cpp or reimplement inference. It
@@ -14,8 +14,16 @@ compiles the patch to a control-vector GGUF (see
 :func:`brainpatch.patch.compiler.export_llamacpp_control_vector`) and drives the
 upstream binary. Upstream stays upstream; BrainPatch supplies the vector.
 
-Two details that are easy to get silently wrong
------------------------------------------------
+Three details that are easy to get silently wrong
+--------------------------------------------------
+**Argument format.** ``--control-vector-scaled`` takes ONE ``FNAME:SCALE``
+token, not two arguments. Passing them separately fails with
+``control-vector-scaled format: FNAME:SCALE``.
+
+**Process termination.** ``-no-cnv`` alone is not enough on b10344: llama-cli
+stays in interactive mode and prints ``> `` forever against EOF stdin, which
+looks exactly like a hang. ``-st/--single-turn`` is what makes it exit.
+
 **Layer indexing.** BrainPatch layers are 0-based decoder blocks. llama.cpp
 control-vector tensors are named ``direction.N`` with **1-based** N, and
 ``--control-vector-layer-range`` is also 1-based and inclusive. The exporter
@@ -204,7 +212,10 @@ class LlamaCppBackend(BrainPatchBackend):
                 path = Path(self._tmpdir.name) / f"{name}.gguf"
                 export_llamacpp_control_vector(active.patch.source, path, strength=1.0)
                 self._vector_files[name] = path
-            args += ["--control-vector-scaled", str(path), f"{multiplier:.6f}"]
+            # Upstream expects a single FNAME:SCALE token, not two arguments.
+            # Passing them separately fails with
+            # `control-vector-scaled format: FNAME:SCALE`.
+            args += ["--control-vector-scaled", f"{path}:{multiplier:.6f}"]
             layers.update(active.manifest.layers)
 
         if layers:
@@ -227,7 +238,12 @@ class LlamaCppBackend(BrainPatchBackend):
             "-n", str(cfg.max_new_tokens),
             "-ngl", str(self.n_gpu_layers),
             "--no-display-prompt",
+            # Both are needed. `-no-cnv` asks for non-conversation mode, but on
+            # llama.cpp b10344 only `-st/--single-turn` reliably makes the
+            # process exit after one turn; without it llama-cli sits in
+            # interactive mode emitting "> " until it is killed.
             "-no-cnv",
+            "-st",
         ]
         if cfg.temperature <= 0:
             cmd += ["--temp", "0"]

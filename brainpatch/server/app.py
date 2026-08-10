@@ -13,13 +13,21 @@ rather than silently ignored.
 
 Security posture: no patch loading over HTTP, no filesystem paths from request
 bodies, no code execution, strengths clamped to each patch's declared envelope.
-"""
 
-from __future__ import annotations
+.. note::
+   This module deliberately has **no** ``from __future__ import annotations``
+   and defines its request models at module scope. FastAPI resolves parameter
+   annotations at runtime against the module's globals; with postponed
+   annotations and locally-defined models it cannot find them, silently demotes
+   the request body to a query parameter, and every POST fails with
+   ``422 Field required``. Keep both properties as they are.
+"""
 
 import time
 import uuid
-from typing import Any
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 from brainpatch.runtime.base import GenerationConfig
 
@@ -27,12 +35,39 @@ from brainpatch.runtime.base import GenerationConfig
 MAX_REQUEST_TOKENS = 4096
 
 
-def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: Optional[str] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=MAX_REQUEST_TOKENS)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    stream: bool = False
+    stop: Optional[List[str]] = None
+    #: Namespaced extension; see the module docstring on why it is validated
+    #: rather than honoured per request.
+    brainpatch: Optional[Dict[str, float]] = None
+
+
+class CompletionRequest(BaseModel):
+    prompt: str
+    model: Optional[str] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=MAX_REQUEST_TOKENS)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    stream: bool = False
+    brainpatch: Optional[Dict[str, float]] = None
+
+
+def build_app(model: Any, served_model_name: Optional[str] = None) -> Any:
     """Build the FastAPI application around an already-loaded model."""
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import StreamingResponse
-        from pydantic import BaseModel, Field
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
             "the server needs FastAPI -- pip install 'brainpatch[server]'"
@@ -47,60 +82,38 @@ def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
     if callable(begin):
         begin()
 
-    class ChatMessage(BaseModel):
-        role: str
-        content: str
-
-    class ChatRequest(BaseModel):
-        model: str | None = None
-        messages: list[ChatMessage]
-        max_tokens: int | None = Field(default=None, ge=1, le=MAX_REQUEST_TOKENS)
-        temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-        top_p: float = Field(default=1.0, gt=0.0, le=1.0)
-        stream: bool = False
-        stop: list[str] | None = None
-        brainpatch: dict[str, float] | None = None
-
-    class CompletionRequest(BaseModel):
-        model: str | None = None
-        prompt: str
-        max_tokens: int | None = Field(default=None, ge=1, le=MAX_REQUEST_TOKENS)
-        temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-        top_p: float = Field(default=1.0, gt=0.0, le=1.0)
-        stream: bool = False
-        brainpatch: dict[str, float] | None = None
-
     api = FastAPI(title="BrainPatch", version="1.0")
 
-    def _check_patch_override(requested: dict[str, float] | None) -> None:
+    def check_patch_override(requested: Optional[Dict[str, float]]) -> None:
         """Accept a per-request patch spec only if it matches the server's."""
         if not requested:
             return
-        if not capabilities.per_request_strength:
-            current = {
-                name: model.backend.patches[name].strength for name in model.list_patches()
-            }
-            mismatched = {
-                name: value
-                for name, value in requested.items()
-                if abs(current.get(name, 0.0) - float(value)) > 1e-9
-            }
-            if mismatched:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "message": (
-                            f"the '{model.backend.name}' backend does not support "
-                            "per-request patch strength; requests share one model, so "
-                            "honouring this would change other users' output."
-                        ),
-                        "server_configuration": current,
-                        "requested": requested,
-                        "hint": "restart the server with the strengths you want",
-                    },
-                )
+        if capabilities.per_request_strength:
+            return
+        current = {name: model.backend.patches[name].strength for name in model.list_patches()}
+        mismatched = {
+            name: value
+            for name, value in requested.items()
+            if abs(current.get(name, 0.0) - float(value)) > 1e-9
+        }
+        if mismatched:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": (
+                        f"the '{model.backend.name}' backend does not support "
+                        "per-request patch strength; requests share one model, so "
+                        "honouring this would change other users' output."
+                    ),
+                    "server_configuration": current,
+                    "requested": requested,
+                    "hint": "restart the server with the strengths you want",
+                },
+            )
 
-    def _config(max_tokens: int | None, temperature: float, top_p: float, stop: list[str] | None) -> GenerationConfig:
+    def make_config(
+        max_tokens: Optional[int], temperature: float, top_p: float, stop: Optional[List[str]]
+    ) -> GenerationConfig:
         return GenerationConfig(
             max_new_tokens=min(max_tokens or 256, MAX_REQUEST_TOKENS),
             temperature=temperature,
@@ -108,7 +121,7 @@ def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
             stop=list(stop or []),
         )
 
-    def _render(messages: list[ChatMessage]) -> tuple[str, str | None]:
+    def render(messages: List[ChatMessage]) -> tuple:
         system = next((m.content for m in messages if m.role == "system"), None)
         user = next((m.content for m in reversed(messages) if m.role == "user"), None)
         if user is None:
@@ -116,7 +129,7 @@ def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
         return user, system
 
     @api.get("/health")
-    def health() -> dict[str, Any]:
+    def health() -> Dict[str, Any]:
         return {
             "status": "ok",
             "backend": model.backend.name,
@@ -132,7 +145,7 @@ def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
         }
 
     @api.get("/v1/models")
-    def list_models() -> dict[str, Any]:
+    def list_models() -> Dict[str, Any]:
         return {
             "object": "list",
             "data": [
@@ -148,73 +161,61 @@ def build_app(model: Any, *, served_model_name: str | None = None) -> Any:
 
     @api.post("/v1/chat/completions")
     def chat_completions(request: ChatRequest) -> Any:
-        _check_patch_override(request.brainpatch)
-        prompt, system = _render(request.messages)
-        cfg = _config(request.max_tokens, request.temperature, request.top_p, request.stop)
+        check_patch_override(request.brainpatch)
+        prompt, system = render(request.messages)
+        cfg = make_config(request.max_tokens, request.temperature, request.top_p, request.stop)
 
         if request.stream:
             return StreamingResponse(
-                _stream_chat(prompt, cfg, system, model_name),
-                media_type="text/event-stream",
+                stream_chat(prompt, cfg, system, model_name), media_type="text/event-stream"
             )
-
         text = model.generate(prompt, cfg, system=system)
-        return _chat_response(text, model_name)
+        return chat_response(text, model_name)
 
     @api.post("/v1/completions")
-    def completions(request: CompletionRequest) -> Any:
-        _check_patch_override(request.brainpatch)
-        cfg = _config(request.max_tokens, request.temperature, request.top_p, None)
+    def completions(request: CompletionRequest) -> Dict[str, Any]:
+        check_patch_override(request.brainpatch)
+        cfg = make_config(request.max_tokens, request.temperature, request.top_p, None)
         text = model.generate(request.prompt, cfg, use_chat_template=False)
         return {
-            "id": f"cmpl-{uuid.uuid4().hex[:24]}",
+            "id": "cmpl-" + uuid.uuid4().hex[:24],
             "object": "text_completion",
             "created": int(time.time()),
             "model": model_name,
             "choices": [{"text": text, "index": 0, "finish_reason": "stop", "logprobs": None}],
         }
 
-    def _stream_chat(prompt: str, cfg: GenerationConfig, system: str | None, name: str) -> Any:
+    def stream_chat(prompt: str, cfg: GenerationConfig, system: Optional[str], name: str):
         import json as _json
 
-        request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        request_id = "chatcmpl-" + uuid.uuid4().hex[:24]
         created = int(time.time())
-        try:
-            for chunk in model.stream(prompt, cfg, system=system):
-                payload = {
-                    "id": request_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": name,
-                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
-                }
-                yield f"data: {_json.dumps(payload)}\n\n"
-        except NotImplementedError:
-            text = model.generate(prompt, cfg, system=system)
+
+        def chunk(delta: Dict[str, Any], finish: Optional[str]) -> str:
             payload = {
                 "id": request_id,
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": name,
-                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
             }
-            yield f"data: {_json.dumps(payload)}\n\n"
-        final = {
-            "id": request_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": name,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        }
-        yield f"data: {_json.dumps(final)}\n\n"
+            return "data: " + _json.dumps(payload) + "\n\n"
+
+        try:
+            for piece in model.stream(prompt, cfg, system=system):
+                yield chunk({"content": piece}, None)
+        except NotImplementedError:
+            # Backends without streaming still serve a valid SSE response.
+            yield chunk({"content": model.generate(prompt, cfg, system=system)}, None)
+        yield chunk({}, "stop")
         yield "data: [DONE]\n\n"
 
     return api
 
 
-def _chat_response(text: str, model_name: str) -> dict[str, Any]:
+def chat_response(text: str, model_name: str) -> Dict[str, Any]:
     return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "id": "chatcmpl-" + uuid.uuid4().hex[:24],
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model_name,

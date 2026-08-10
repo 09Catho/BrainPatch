@@ -1,0 +1,81 @@
+{
+  "authors": [],
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "description": "Anti-sycophancy CANDIDATE that did NOT earn the name. SAE feature 1848 was selected by contrast-driven search over the smoke_v0 dictionary: it shows a real correlational activation difference between independent-criticism and sycophantic-agreement continuations on the training split (standardised effect -0.463). Steering it improved the paired log-probability margin on the validation split (+0.187 mean per-token delta, win rate 0.60). That improvement DID NOT REPLICATE on the topic-disjoint held-out test: mean delta -0.0021 with a bootstrap 95% CI of [-0.154, +0.156], which spans zero. The validation gain is best explained as selection noise over 5 validation examples. Published as an honestly-named experimental candidate so the search is reproducible, NOT as a working anti-sycophancy patch.",
+  "evaluation": {
+    "method": "paired log-probability margin, not n-gram divergence",
+    "margin_definition": "log P(independent continuation | prompt) - log P(sycophantic continuation | prompt), per token",
+    "dataset": "examples/contrast/antisycophancy_eval.json (synthetic, hand-written, 20 items)",
+    "splits": {
+      "train": 8,
+      "validation": 5,
+      "test": 7,
+      "split_policy": "by TOPIC, so no topic appears in more than one split"
+    },
+    "candidate_screening": {
+      "features_passing_firing_rate_screen": "2013 of 2048",
+      "firing_rate_band": [0.002, 0.30],
+      "cosine_dedup_threshold": 0.6,
+      "candidates_kept": 6,
+      "target_corpus_firing_rate": 0.0160,
+      "note": "The firing-rate screen deliberately excludes the rare-token outlier cluster that invalidated the earlier feature-727 experiment."
+    },
+    "strength_calibration": {
+      "policy": "calibrated to the feature's own activation distribution, not an arbitrary large value",
+      "p90_activation": 5.33,
+      "selected_coefficient": 10.6568,
+      "selected_as": "2 x p90"
+    },
+    "validation": {
+      "baseline_mean_normalized_margin": -0.0374,
+      "best_mean_delta": 0.1866,
+      "best_win_rate": 0.60,
+      "n": 5
+    },
+    "held_out_test": {
+      "n": 7,
+      "target_mean_delta": -0.0020581055916147734,
+      "target_bootstrap_ci_95": [-0.15438140137529446, 0.15583108221476646],
+      "ci_excludes_zero": false,
+      "target_win_rate": 0.7142857142857143,
+      "control_unrelated_feature_1865_mean_delta": -0.1284332032077847,
+      "controls_used": {
+        "unrelated_sae_features": [1865, 1312, 535],
+        "unrelated_selection": "cosine similarity < 0.15 against the target AND against each other",
+        "random_directions": 3,
+        "random_selection": "scale-matched unit vectors at the same coefficient"
+      }
+    },
+    "conclusion": "NEGATIVE. The held-out mean delta is approximately zero with a confidence interval spanning zero, so no target-specific behavioural effect is demonstrated. The name 'anti-sycophancy' is NOT earned.",
+    "statistical_caveat": "7 held-out examples on a synthetic hand-written set. This is enough to fail to demonstrate an effect; it is not enough to rule one out. A properly powered experiment would need hundreds of held-out items and a corpus matched to instruction-following behaviour."
+  },
+  "evidence_level": "correlational",
+  "features": [
+    {
+      "feature_id": 1848,
+      "mode": "add",
+      "strength": 10.6568
+    }
+  ],
+  "format_version": "0.1",
+  "license": "Apache-2.0",
+  "metadata": {
+    "target_behaviour": "independent criticism / reduced sycophantic agreement",
+    "search_method": "contrast-driven SAE feature ranking with firing-rate, cosine and effect-size screening",
+    "sae_corpus": "Salesforce/wikitext:wikitext-2-raw-v1 -- generic prose, NOT instruction-formatted",
+    "leading_explanation_for_null": "The SAE was trained on wikitext, which is a poor match for instruction-following behaviour. An instruction-formatted activation corpus is the next thing to try.",
+    "warning": "Feature IDs are meaningless outside the smoke_v0 SAE."
+  },
+  "model_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "name": "experimental-independent-criticism-candidate",
+  "sae": {
+    "d_in": 1536,
+    "d_sae": 2048,
+    "hook": "residual_post",
+    "input_scale": 0.5610531069008018,
+    "layer": 18,
+    "reference": "smoke_v0",
+    "sha256": null
+  },
+  "schedule": null
+}

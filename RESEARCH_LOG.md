@@ -603,6 +603,157 @@ than loading with a silently unrecognised label.
 
 ---
 
+## Backend verification: llama.cpp and vLLM
+
+Both moved from *implemented* to *verified* against real engines. Several
+upstream behaviours had to be discovered empirically rather than assumed, and
+each would have produced a wrong or fake-looking result if guessed.
+
+### llama.cpp (upstream b10344, 7a20b417f)
+
+Verified on a real 1.12 GB **Q4_K_M** GGUF (`Qwen/Qwen2.5-1.5B-Instruct-GGUF`),
+driving the upstream `llama-cli` binary -- no fork.
+
+| check | result |
+|---|---|
+| layer mapping: BrainPatch L18 (0-based) to `direction.19` (1-based) | pass |
+| scale 0 matches baseline | pass (character-identical generation) |
+| non-zero scale changes output | pass |
+| layer range honoured | pass |
+| no crash / no model corruption | pass |
+
+Three things upstream does that the first implementation got wrong:
+
+1. **`--control-vector-scaled` takes one `FNAME:SCALE` token**, not two
+   arguments. Passing them separately fails with
+   `control-vector-scaled format: FNAME:SCALE`.
+2. **`-no-cnv` alone does not terminate the process.** llama-cli stayed in
+   interactive mode printing `> ` forever against EOF stdin -- indistinguishable
+   from a hang, and it cost several runs to diagnose. `-st/--single-turn` is
+   what makes it exit.
+3. **stdout is full of non-deterministic chrome**: an animated loading spinner,
+   an ASCII logo, and a trailing `[ Prompt: 262.4 t/s | Generation: 47.9 t/s ]`
+   line. Comparing raw stdout reported baseline and scale-0 as *different* when
+   their generations were character-identical and only the measured throughput
+   differed. The test now extracts just the answer.
+
+Also worth recording: the GGUF must be staged to container-local disk.
+llama.cpp mmaps the model, and mmap against the Volume's network filesystem
+turns every page fault into a network round trip.
+
+**Quantization honesty.** The direction still changes output at Q4_K_M. Whether
+it produces the *same* behavioural effect as at bf16 is untested, and the patch
+manifest says exactly that.
+
+### vLLM 0.11.0
+
+| check | result |
+|---|---|
+| hooks installed **inside the vLLM worker process** | pass |
+| scale 0 matches baseline | pass |
+| non-zero scale changes output | pass |
+| batched requests agree with single requests | pass |
+| OpenAI server: two concurrent requests, no state leak | pass |
+| mismatched per-request strength rejected with 400 | pass |
+
+The worker itself reports `Qwen2ForCausalLM`, 28 layers, `active_hooks: 1`,
+`hooked_layers: [18]`, `cuda:0`, `torch.bfloat16`. That report is the evidence
+the intervention runs inside vLLM rather than in a substituted Transformers
+model -- output changes alone could not distinguish the two.
+
+Two constraints shaped the design:
+
+* **V1 runs the model in a separate process**, so attribute traversal off the
+  `LLM` object cannot reach it.
+* **The RPC channel is msgpack and refuses to serialize a callable**, suggesting
+  `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. That would turn the engine's control
+  channel into an arbitrary-code path for our convenience, so it was not used.
+  The supported `worker_extension_cls` mechanism calls methods **by name** with
+  msgpack-safe arguments instead.
+
+Also fixed: the OpenAI server returned `422 Field required` for every POST,
+because `from __future__ import annotations` plus locally-defined Pydantic
+models left FastAPI unable to resolve the body type, silently demoting it to a
+query parameter. This is the second time postponed annotations broke a framework
+that introspects them at runtime (the first was `modal.parameter`).
+
+**Throughput was not measured reliably on vLLM.** The server benchmark ran the
+patched condition first and the baseline second, and vLLM's prefix cache makes a
+second pass over identical prompts much faster. The resulting "+82.7% overhead"
+is an artifact of ordering, not a property of the patch, and is deliberately not
+reported as an overhead figure. The Transformers benchmark (-1.3%, within noise)
+was ordered correctly and stands.
+
+---
+
+## Anti-sycophancy attempt: negative, with a much better method
+
+Stage A of the staged plan: reuse the `smoke_v0` SAE and search it with a
+behaviour-specific objective. Total cost well under a dollar.
+
+### What was done differently from the first experiment
+
+* **Objective**: paired log-probability margin,
+  `log P(independent | prompt) - log P(sycophantic | prompt)`, per token -- not
+  n-gram divergence, which rewards *any* perturbation and is how a random
+  direction beat the real feature last time.
+* **Splits by topic**, not by row, so no topic appears in more than one split.
+  20 hand-written items: 8 train / 5 validation / 7 test.
+* **Screening**: 2013 of 2048 features passed a firing-rate band of
+  [0.002, 0.30], deliberately excluding the rare-token cluster that invalidated
+  the feature-727 result. Then cosine deduplication at 0.6, leaving 6 candidates
+  with corpus firing rates 0.0101-0.0171 -- right around the dictionary median
+  of 0.0136, not the pathological tail.
+* **Strength calibrated to each feature's own p90 activation**, so the
+  intervention stays on-manifold rather than relying on a huge off-distribution
+  coefficient.
+* **Controls chosen properly**: three unrelated SAE features screened to cosine
+  < 0.15 against the target *and* against each other, plus three scale-matched
+  random directions.
+
+### Result
+
+| stage | outcome |
+|---|---|
+| train (n=8) | feature 1848, standardised effect -0.463, corpus firing rate 0.0160 |
+| validation (n=5) | best config f1848 at coefficient +10.66: mean delta **+0.187**, win rate 0.60 |
+| **held-out test (n=7)** | mean delta **-0.0021**, bootstrap 95% CI **[-0.154, +0.156]** |
+
+**NEGATIVE.** The validation improvement did not replicate on the topic-disjoint
+held-out split, and the confidence interval spans zero. The most likely
+explanation is that +0.187 was selection noise over five validation examples --
+which is exactly what a held-out split exists to catch.
+
+The patch is published as `experimental-independent-criticism-candidate` at
+`evidence_level: correlational`: the train-split activation difference is a real
+correlation, and the behavioural claim is not supported. It does **not** get the
+name `anti-sycophancy`.
+
+### A bug that would have faked a different negative
+
+The first Stage A run reported *exactly* `+0.0000` delta for every candidate at
+every strength. That was not a result: log-probability scoring calls the model
+directly for a single forward pass, while the backend attaches its hooks inside
+`generate()`. No intervention was ever applied.
+
+A zero delta for every condition looks exactly like "the feature does nothing",
+which is a conclusion one might well have published. `score_examples` now
+installs the hooks explicitly and raises if patches are installed but no hooks
+are attached, so the failure cannot recur silently.
+
+### What to try next
+
+1. **An instruction-formatted activation corpus.** The SAE was trained on
+   wikitext -- generic encyclopedic prose -- while sycophancy is an
+   instruction-following property. This is the leading explanation for the null
+   and is Stage B of the plan (~50k tokens, d_sae ~4096, one L4).
+2. **More held-out items.** Seven examples can fail to demonstrate an effect;
+   they cannot rule one out.
+3. Only then consider scaling the dictionary.
+
+
+---
+
 ## Unresolved scientific issues
 
 1. **Does any SAE feature here carry causal behavioural meaning?** Unknown. The

@@ -222,7 +222,33 @@ def validate(
     backend: str = typer.Option("auto", "--backend"),
     mode: str = typer.Option("strict", "--mode", help="strict | architecture | unsafe"),
 ) -> None:
-    """Validate a patch archive, and optionally its fit to a model."""
+    """Validate a patch archive or a directory of patches."""
+    target = Path(patch).expanduser()
+    if target.is_dir():
+        # A directory may hold runtime artifacts, research patches, or both.
+        from brainpatch.patch.loader import PatchLoadError
+        from brainpatch.patch.loader import load_patch as load_runtime
+        from brainpatch.schemas.patch import PatchValidationError
+        from brainpatch.schemas.patch_io import load_patch as load_research
+
+        files = sorted(list(target.glob("*.brainpatch")) + list(target.glob("*.json")))
+        if not files:
+            console.print(f"[yellow]no patches found in {target}[/yellow]")
+            raise typer.Exit()
+        failed = 0
+        for path in files:
+            try:
+                if path.suffix == ".brainpatch":
+                    console.print(f"[green]ok[/green]      {path.name}: {load_runtime(path).manifest.summary()}")
+                else:
+                    console.print(f"[green]ok[/green]      {path.name}: {load_research(path).summary()}")
+            except (PatchLoadError, PatchValidationError, OSError) as exc:
+                failed += 1
+                console.print(f"[red]invalid[/red] {path.name}: {exc}")
+        if failed:
+            raise typer.Exit(code=1)
+        return
+
     loaded = _load_patch_arg(patch)
     console.print(f"[green]ok[/green]  archive, checksums and manifest are valid")
     console.print(f"     {loaded.manifest.summary()}")
