@@ -2,7 +2,7 @@
 
 Pure-Python text metrics live in :mod:`brainpatch.evaluation.metrics` and can be
 computed anywhere. Model-dependent measurements (log-probabilities, capability
-probes) require torch and live in :mod:`brainpatch.ml.evaluation`.
+probes) require torch and live in :mod:`brainpatch.research.ml.evaluation`.
 """
 
 from brainpatch.evaluation.metrics import (

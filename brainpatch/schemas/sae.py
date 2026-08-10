@@ -1,7 +1,7 @@
 """Top-K sparse autoencoder configuration.
 
 This module holds only the *description* of an SAE. The torch implementation
-lives in :mod:`brainpatch.ml.sae` and is never imported locally.
+lives in :mod:`brainpatch.research.ml.sae` and is never imported locally.
 
 Design notes captured here because they matter for correctness of downstream
 interventions:

@@ -41,8 +41,8 @@ from typing import Any
 
 import torch
 
-from brainpatch.ml.hooks import ResidualInjector
-from brainpatch.ml.sae import TopKSAE
+from brainpatch.research.ml.hooks import ResidualInjector
+from brainpatch.research.ml.sae import TopKSAE
 from brainpatch.steering.plan import InterventionPlan, PlannedEdit
 
 
@@ -133,7 +133,7 @@ class FeatureSteerer:
         """Combine planned edits into one residual-stream delta.
 
         Returns ``None`` when there is nothing to do, which propagates through
-        :class:`~brainpatch.ml.hooks.ResidualInjector` as "leave the tensor
+        :class:`~brainpatch.research.ml.hooks.ResidualInjector` as "leave the tensor
         completely untouched".
         """
         additive = [e for e in edits if e.mode == "add"]
@@ -171,7 +171,7 @@ class FeatureSteerer:
     # -- hook callback ---------------------------------------------------------
 
     def __call__(self, hidden: torch.Tensor) -> torch.Tensor | None:
-        """Delta callback for :class:`~brainpatch.ml.hooks.ResidualInjector`."""
+        """Delta callback for :class:`~brainpatch.research.ml.hooks.ResidualInjector`."""
         self.stats.forward_passes += 1
         is_prompt_pass = self._pass_index == 0
         self._pass_index += 1

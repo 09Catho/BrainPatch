@@ -34,12 +34,12 @@ from typing import Any
 
 import torch
 
-from brainpatch.ml.generation import GenerationConfig, build_chat_prompt
-from brainpatch.ml.hooks import HookSet
-from brainpatch.ml.intervention import FeatureSteerer, make_steerer
-from brainpatch.ml.model import DEFAULT_MODEL, ModelBundle, load_model
-from brainpatch.ml.sae import TopKSAE
-from brainpatch.patches.io import load_patch
+from brainpatch.research.ml.generation import GenerationConfig, build_chat_prompt
+from brainpatch.research.ml.hooks import HookSet
+from brainpatch.research.ml.intervention import FeatureSteerer, make_steerer
+from brainpatch.research.ml.model import DEFAULT_MODEL, ModelBundle, load_model
+from brainpatch.research.ml.sae import TopKSAE
+from brainpatch.schemas.patch_io import load_patch
 from brainpatch.schemas.patch import BrainPatchSpec, FeatureEdit, SAEReference
 from brainpatch.steering.plan import InterventionPlan
 from brainpatch.steering.schedule import StrengthSchedule

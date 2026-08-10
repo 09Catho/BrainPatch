@@ -6,7 +6,7 @@ is loaded (also CPU) so that top-activating contexts can be decoded back into
 readable text.
 
 Nothing in here assigns a semantic label to a feature. See
-:mod:`brainpatch.ml.feature_analysis`.
+:mod:`brainpatch.research.ml.feature_analysis`.
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ def analyze_features(
     """Build ``/vol/feature-db/<experiment>/features.jsonl`` from a trained SAE."""
     import torch
 
-    from brainpatch.ml.activation_store import ActivationSubset
-    from brainpatch.ml.feature_analysis import build_feature_database
-    from brainpatch.ml.sae import TopKSAE
+    from brainpatch.research.ml.activation_store import ActivationSubset
+    from brainpatch.research.ml.feature_analysis import build_feature_database
+    from brainpatch.research.ml.sae import TopKSAE
     from brainpatch.paths import VolumePaths
 
     paths = VolumePaths(VOL_MOUNT)
@@ -78,7 +78,7 @@ def top_features(
     max_firing_rate: float = 0.5,
 ) -> list[dict[str, Any]]:
     """List the highest-ranked features with their top contexts."""
-    from brainpatch.ml.feature_analysis import rank_features
+    from brainpatch.research.ml.feature_analysis import rank_features
     from brainpatch.paths import VolumePaths
 
     paths = VolumePaths(VOL_MOUNT)

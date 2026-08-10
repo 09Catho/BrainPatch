@@ -1,42 +1,75 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "brainpatch"
-version = "0.1.0"
-description = "Experimental activation-space behavioural interventions for frozen language models."
+version = "1.0.0"
+description = "Tiny, installable activation patches for frozen language models."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "BrainPatch contributors" }]
 keywords = [
+    "activation-steering",
+    "interpretability",
+    "llm",
     "mechanistic-interpretability",
     "sparse-autoencoder",
-    "activation-steering",
-    "modal",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# NOTE: the *core* dependency set is deliberately tiny. `import brainpatch` must
-# work on a laptop with no ML stack installed. Everything heavy (torch,
-# transformers, datasets, ...) is installed only inside the Modal Image and is
-# imported lazily from `brainpatch.ml.*`.
+# The core wheel is deliberately tiny. Reading, validating, installing and
+# inspecting a patch must work on a bare Python -- no torch, no numpy, not even
+# safetensors (the container is parsed by brainpatch.patch.tensors in pure
+# Python). Every heavy engine is an opt-in extra.
 dependencies = [
-    "pyyaml>=6.0",
     "typer>=0.12",
     "rich>=13.0",
 ]
 
 [project.optional-dependencies]
-# Control plane: what you need locally to *launch* Modal jobs.
+# --- inference backends ------------------------------------------------------
+transformers = ["torch>=2.1", "transformers>=4.40", "accelerate>=0.30"]
+vllm = ["vllm>=0.6", "torch>=2.1"]
+mlx = ["mlx-lm>=0.20; platform_system == 'Darwin' and platform_machine == 'arm64'"]
+# llama.cpp is an external binary, not a Python package. `gguf` is only needed
+# to write control vectors and read GGUF headers.
+llamacpp = ["gguf>=0.10", "numpy>=1.24"]
+
+# --- product surfaces --------------------------------------------------------
+hub = ["huggingface_hub>=0.25"]
+server = ["fastapi>=0.110", "uvicorn>=0.30", "pydantic>=2.0"]
+ui = ["gradio>=4.44"]
+
+# --- authoring / research ----------------------------------------------------
+research = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "datasets>=2.19",
+    "accelerate>=0.30",
+    "safetensors>=0.4",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "huggingface_hub>=0.25",
+]
 modal = ["modal>=1.5.0"]
-dev = ["pytest>=8.0"]
+
+# --- convenience -------------------------------------------------------------
+all = [
+    "brainpatch[transformers,hub,server,ui,llamacpp]",
+]
+dev = ["pytest>=8.0", "build>=1.2"]
 
 [project.scripts]
 brainpatch = "brainpatch.cli:main"
@@ -44,14 +77,18 @@ brainpatch = "brainpatch.cli:main"
 [project.urls]
 Homepage = "https://github.com/09Catho/BrainPatch"
 Repository = "https://github.com/09Catho/BrainPatch"
+Documentation = "https://github.com/09Catho/BrainPatch/tree/main/docs"
+Issues = "https://github.com/09Catho/BrainPatch/issues"
 
 [tool.setuptools.packages.find]
 include = ["brainpatch*"]
+exclude = ["modal_app*", "tests*", "integration_tests*"]
+
+[tool.setuptools.package-data]
+brainpatch = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Local test runs must never touch Modal or a GPU. Remote tests are opt-in and
-# live behind explicit `modal run` commands, not pytest.
 addopts = "-q --strict-markers"
 markers = [
     "local: pure-python test, no ML stack, no network (the default)",

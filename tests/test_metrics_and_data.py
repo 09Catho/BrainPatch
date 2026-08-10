@@ -14,7 +14,7 @@ from brainpatch.evaluation.metrics import (
     score_generation,
     tokenize_words,
 )
-from brainpatch.patches.io import discover_patches, load_patch, load_patch_dir, save_patch
+from brainpatch.schemas.patch_io import discover_patches, load_patch, load_patch_dir, save_patch
 from brainpatch.schemas.contrast import ContrastExample, ContrastSet
 
 # Real generations captured from the smoke_v0 strength sweep on Modal. Using

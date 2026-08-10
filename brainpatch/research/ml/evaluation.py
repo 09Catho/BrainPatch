@@ -113,12 +113,12 @@ def run_utility_probes(
     Parameters
     ----------
     model:
-        A :class:`~brainpatch.ml.runtime.BrainPatchedModel`. Whatever patches
+        A :class:`~brainpatch.research.ml.runtime.BrainPatchedModel`. Whatever patches
         are currently installed are active, which is the point: this is called
         once with them disabled and once with them enabled.
     """
     from brainpatch.evaluation.metrics import score_generation
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.generation import GenerationConfig
 
     cfg = generation or GenerationConfig(max_new_tokens=48)
     report = UtilityReport(condition=condition, total=0, correct=0)

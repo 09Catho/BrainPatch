@@ -23,8 +23,8 @@ from typing import Any
 
 import torch
 
-from brainpatch.ml.activation_store import ActivationSubset, read_manifest
-from brainpatch.ml.sae import TopKSAE
+from brainpatch.research.ml.activation_store import ActivationSubset, read_manifest
+from brainpatch.research.ml.sae import TopKSAE
 from brainpatch.paths import VolumePaths
 from brainpatch.schemas.feature import FeatureContext, FeatureRecord, FeatureStats
 

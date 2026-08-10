@@ -47,7 +47,7 @@ class DemoServer:
 
     @modal.enter()
     def load(self) -> None:
-        from brainpatch.ml.runtime import BrainPatchedModel
+        from brainpatch.research.ml.runtime import BrainPatchedModel
         from brainpatch.paths import VolumePaths
 
         import torch
@@ -75,7 +75,7 @@ class DemoServer:
     ) -> dict:
         """Generate baseline and patched completions for the same prompt."""
         from brainpatch.evaluation.metrics import compare_generations
-        from brainpatch.ml.generation import GenerationConfig
+        from brainpatch.research.ml.generation import GenerationConfig
         from brainpatch.steering.schedule import StrengthSchedule
 
         cfg = GenerationConfig(max_new_tokens=max_new_tokens)

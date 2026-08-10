@@ -29,7 +29,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from brainpatch.ml.sae import TopKSAE, reconstruction_metrics
+from brainpatch.research.ml.sae import TopKSAE, reconstruction_metrics
 from brainpatch.schemas.sae import SAEConfig
 
 

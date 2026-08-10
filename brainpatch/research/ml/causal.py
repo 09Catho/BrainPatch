@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from brainpatch.evaluation.metrics import compare_generations, score_generation
-from brainpatch.ml.generation import GenerationConfig
-from brainpatch.ml.runtime import BrainPatchedModel
+from brainpatch.research.ml.generation import GenerationConfig
+from brainpatch.research.ml.runtime import BrainPatchedModel
 from brainpatch.paths import VolumePaths
 from brainpatch.schemas.patch import BrainPatchSpec, FeatureEdit, SAEReference
 

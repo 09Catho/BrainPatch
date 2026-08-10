@@ -76,8 +76,8 @@ def audit_topk_liveness(experiment: str = "smoke_v0") -> dict[str, Any]:
 
     import torch
 
-    from brainpatch.ml.activation_store import ActivationSubset
-    from brainpatch.ml.sae import TopKSAE
+    from brainpatch.research.ml.activation_store import ActivationSubset
+    from brainpatch.research.ml.sae import TopKSAE
     from brainpatch.paths import VolumePaths
 
     paths = VolumePaths(VOL_MOUNT)

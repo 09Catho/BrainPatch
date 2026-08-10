@@ -45,9 +45,9 @@ def extract_activations(
     """
     assert_token_budget(target_tokens, approved=approved)
 
-    from brainpatch.ml.corpus import CorpusConfig
-    from brainpatch.ml.extraction import ExtractionConfig, extract_activations as run_extraction
-    from brainpatch.ml.model import load_model
+    from brainpatch.research.ml.corpus import CorpusConfig
+    from brainpatch.research.ml.extraction import ExtractionConfig, extract_activations as run_extraction
+    from brainpatch.research.ml.model import load_model
     from brainpatch.paths import VolumePaths
     from modal_app.image import pinned_versions
 

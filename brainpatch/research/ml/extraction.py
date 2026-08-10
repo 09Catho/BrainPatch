@@ -43,9 +43,9 @@ from typing import Any, Callable
 
 import torch
 
-from brainpatch.ml.corpus import CorpusConfig, TokenBlock, batched, iter_token_blocks
-from brainpatch.ml.hooks import ResidualCapture
-from brainpatch.ml.model import ModelBundle, validate_hook, validate_layer
+from brainpatch.research.ml.corpus import CorpusConfig, TokenBlock, batched, iter_token_blocks
+from brainpatch.research.ml.hooks import ResidualCapture
+from brainpatch.research.ml.model import ModelBundle, validate_hook, validate_layer
 from brainpatch.paths import VolumePaths, shard_filename
 from brainpatch.schemas.manifest import ActivationManifest, ShardRecord
 

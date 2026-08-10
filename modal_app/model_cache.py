@@ -69,7 +69,7 @@ def model_architecture(model_id: str = DEFAULT_MODEL, revision: str | None = Non
     Used to validate a configured target layer *before* any GPU time is spent
     discovering that layer 18 does not exist.
     """
-    from brainpatch.ml.model import architecture_summary
+    from brainpatch.research.ml.model import architecture_summary
 
     summary = architecture_summary(model_id, revision)
     print(json.dumps(summary, indent=2))
@@ -97,8 +97,8 @@ def verify_cached_model(
 
     import torch
 
-    from brainpatch.ml.hooks import ResidualCapture
-    from brainpatch.ml.model import load_model, validate_layer
+    from brainpatch.research.ml.hooks import ResidualCapture
+    from brainpatch.research.ml.model import load_model, validate_layer
 
     hub_cache = Path("/vol/hf-cache/hub")
     cached_before = hub_cache.is_dir() and any(hub_cache.iterdir())

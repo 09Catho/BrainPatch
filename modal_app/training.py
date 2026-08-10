@@ -32,8 +32,8 @@ def train_sae(
     force: bool = False,
 ) -> dict[str, Any]:
     """Train a Top-K SAE on a previously extracted activation corpus."""
-    from brainpatch.ml.activation_store import ActivationSubset, read_manifest
-    from brainpatch.ml.training import train_sae as run_training
+    from brainpatch.research.ml.activation_store import ActivationSubset, read_manifest
+    from brainpatch.research.ml.training import train_sae as run_training
     from brainpatch.paths import VolumePaths
     from brainpatch.schemas.sae import SAEConfig
     from modal_app.image import pinned_versions

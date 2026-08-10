@@ -26,7 +26,7 @@ from modal_app.resources import VOL_MOUNT, app, gpu_kwargs, volume
 
 def _load_patched_model(experiment: str, device: str = "cuda"):
     """Load the base model with the experiment's SAE attached."""
-    from brainpatch.ml.runtime import BrainPatchedModel
+    from brainpatch.research.ml.runtime import BrainPatchedModel
     from brainpatch.paths import VolumePaths
 
     paths = VolumePaths(VOL_MOUNT)
@@ -57,8 +57,8 @@ def intervention_smoke(
     output *byte-identical* to running with no patch installed. If that fails,
     every baseline measured anywhere in this project is contaminated.
     """
-    from brainpatch.ml.feature_analysis import rank_features
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.feature_analysis import rank_features
+    from brainpatch.research.ml.generation import GenerationConfig
 
     model, paths = _load_patched_model(experiment)
     assert model.sae is not None
@@ -211,9 +211,9 @@ def sweep_strength(
     which generations become degenerate. The useful window is where divergence
     has risen but degeneration has not.
     """
-    from brainpatch.ml.feature_analysis import rank_features
-    from brainpatch.ml.generation import GenerationConfig
-    from brainpatch.ml.patch_search import strength_sweep
+    from brainpatch.research.ml.feature_analysis import rank_features
+    from brainpatch.research.ml.generation import GenerationConfig
+    from brainpatch.research.ml.patch_search import strength_sweep
 
     model, paths = _load_patched_model(experiment)
     assert model.sae is not None
@@ -267,14 +267,14 @@ def intervention_experiment(
     Cost is roughly ``7 * num_prompts`` generations plus, if enabled, two runs
     of the utility probe suite. Both are bounded deliberately.
     """
-    from brainpatch.ml.causal import (
+    from brainpatch.research.ml.causal import (
         run_intervention_experiment,
         summarize_experiment,
         write_experiment_artifacts,
     )
-    from brainpatch.ml.evaluation import compare_utility, run_utility_probes
-    from brainpatch.ml.feature_analysis import rank_features
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.evaluation import compare_utility, run_utility_probes
+    from brainpatch.research.ml.feature_analysis import rank_features
+    from brainpatch.research.ml.generation import GenerationConfig
     from modal_app.image import pinned_versions
 
     model, paths = _load_patched_model(experiment)
@@ -307,7 +307,7 @@ def intervention_experiment(
 
     utility: dict[str, Any] | None = None
     if run_utility:
-        from brainpatch.ml.causal import _spec_for
+        from brainpatch.research.ml.causal import _spec_for
 
         model.plan.patches = {}
         baseline_utility = run_utility_probes(model, condition="baseline", generation=cfg)
@@ -364,8 +364,8 @@ def dynamic_steering_demo(
     up at the keyframe index. That trace comes from the real generation, not
     from a replayed simulation of it.
     """
-    from brainpatch.ml.feature_analysis import rank_features
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.feature_analysis import rank_features
+    from brainpatch.research.ml.generation import GenerationConfig
     from brainpatch.steering.schedule import StrengthSchedule
 
     model, paths = _load_patched_model(experiment)

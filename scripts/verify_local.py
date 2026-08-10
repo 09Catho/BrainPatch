@@ -51,7 +51,7 @@ def check_import_boundary() -> bool:
 
 
 def check_patches() -> bool:
-    from brainpatch.patches.io import load_patch_dir
+    from brainpatch.schemas.patch_io import load_patch_dir
 
     specs, failures = load_patch_dir(REPO_ROOT / "patches", strict=False)
     for path, message in failures:

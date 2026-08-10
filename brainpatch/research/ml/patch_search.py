@@ -29,10 +29,10 @@ from typing import Any, Sequence
 
 import torch
 
-from brainpatch.ml.generation import build_chat_prompt
-from brainpatch.ml.hooks import ResidualCapture
-from brainpatch.ml.model import ModelBundle
-from brainpatch.ml.sae import TopKSAE
+from brainpatch.research.ml.generation import build_chat_prompt
+from brainpatch.research.ml.hooks import ResidualCapture
+from brainpatch.research.ml.model import ModelBundle
+from brainpatch.research.ml.sae import TopKSAE
 from brainpatch.schemas.contrast import ContrastSet
 
 
@@ -224,8 +224,8 @@ def strength_sweep(
     ``len(prompts)`` generations, so keep both lists short.
     """
     from brainpatch.evaluation.metrics import jaccard_similarity, score_generation
-    from brainpatch.ml.causal import _spec_for
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.causal import _spec_for
+    from brainpatch.research.ml.generation import GenerationConfig
 
     cfg = generation or GenerationConfig(max_new_tokens=96)
     saved = dict(model.plan.patches)
@@ -283,8 +283,8 @@ def greedy_feature_selection(
     Keep the candidate list to single digits.
     """
     from brainpatch.evaluation.metrics import jaccard_similarity, score_generation
-    from brainpatch.ml.causal import _spec_for
-    from brainpatch.ml.generation import GenerationConfig
+    from brainpatch.research.ml.causal import _spec_for
+    from brainpatch.research.ml.generation import GenerationConfig
     from brainpatch.schemas.patch import BrainPatchSpec, FeatureEdit
 
     cfg = generation or GenerationConfig(max_new_tokens=96)

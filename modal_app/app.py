@@ -36,6 +36,11 @@ from modal_app.intervention import (
 from modal_app.model_cache import cache_model, model_architecture, verify_cached_model
 from modal_app.dataset_release import build_dataset_tables, publish_dataset_release
 from modal_app.publish import publish_to_huggingface, sync_patches
+from modal_app.product_tests import (
+    benchmark_transformers,
+    compile_reference_patch,
+    test_transformers_backend,
+)
 from modal_app.resources import app
 from modal_app.sae_audit import audit_topk_liveness, sae_unit_tests
 from modal_app.training import train_sae
@@ -45,8 +50,10 @@ __all__ = [
     "analyze_features",
     "app",
     "audit_topk_liveness",
+    "benchmark_transformers",
     "build_dataset_tables",
     "cache_model",
+    "compile_reference_patch",
     "cpu_smoke",
     "dynamic_steering_demo",
     "extract_activations",
@@ -64,6 +71,7 @@ __all__ = [
     "sweep_strength",
     "top_features",
     "train_sae",
+    "test_transformers_backend",
     "verify_cached_model",
     "verify_model_card_example",
     "volume_report",

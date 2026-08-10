@@ -20,8 +20,8 @@ from typing import Any, Callable
 
 import torch
 
-from brainpatch.ml.activation_store import ActivationSubset
-from brainpatch.ml.sae import TopKSAE, reconstruction_metrics
+from brainpatch.research.ml.activation_store import ActivationSubset
+from brainpatch.research.ml.sae import TopKSAE, reconstruction_metrics
 from brainpatch.paths import VolumePaths
 from brainpatch.schemas.sae import SAEConfig
 
