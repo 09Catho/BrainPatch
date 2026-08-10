@@ -1,5 +1,19 @@
 # The BrainPatch file format (v0.1)
 
+> **This page documents the LEGACY v0.1 RESEARCH format.**
+>
+> v0.1 records SAE feature IDs and needs the SAE at apply time. It is what a
+> research experiment produces and what `brainpatch compile` consumes.
+>
+> **The runtime format is v1 `.brainpatch`** -- a self-contained ZIP of
+> materialised vectors that needs no SAE, no research tooling and no network.
+> That is what users install and what every backend applies. See the
+> [README](../README.md#the-brainpatch-format) for the v1 container and
+> [`brainpatch/patch/format.py`](../brainpatch/patch/format.py) for its schema.
+>
+> Both are kept: v0.1 for reproducing the research, v1 for shipping.
+
+
 A BrainPatch is a JSON document describing an activation-space intervention on
 one model, at one layer, under one SAE. It is small enough to read, diff, and
 review by hand — which is the point.
@@ -111,9 +125,9 @@ The multiplier scales every `features[].strength` in the patch.
 `spec.is_validated` is True only at `replicated` — one passing controlled
 experiment is a result, not a validation.
 
-Nothing advances a patch past `correlational` automatically. Both patches
-shipped in this repository are `none`, because their controls came back
-negative — see [`../RESEARCH_LOG.md`](../RESEARCH_LOG.md).
+Nothing advances a patch past `correlational` automatically. No patch shipped in
+this repository is above `correlational`, because every controlled test so far
+came back negative — see [`../RESEARCH_LOG.md`](../RESEARCH_LOG.md).
 
 A patch named `honesty.json` at `evidence_level: none` would be dishonest. A
 patch named `experimental-feature-1207.json` is not.

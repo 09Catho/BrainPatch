@@ -302,14 +302,15 @@ modal run modal_app/app.py::test_transformers_backend
 modal run modal_app/app.py::sae_unit_tests
 ```
 
-Total metered spend for the entire project to date: **$0.18**.
+Total metered spend for the entire project to date: **$0.77**, including all
+three backend verifications and the behavioural experiment.
 
 See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).
 
 ## Testing
 
 ```bash
-pytest                                          # 266 pure-Python tests, no ML stack
+pytest                                          # 277 pure-Python tests, no ML stack
 modal run modal_app/app.py::sae_unit_tests      # SAE maths (needs torch)
 modal run modal_app/app.py::test_transformers_backend   # real-model acceptance
 ```
@@ -341,7 +342,7 @@ brainpatch/
 ├── schemas/      v0.1 research patch, SAE config, manifests
 └── research/     SAE training, extraction, discovery, validation
 modal_app/        research + integration-test orchestration (optional)
-tests/            266 pure-Python tests · tests/remote/ needs torch
+tests/            277 pure-Python tests · tests/remote/ needs torch
 ```
 
 ## Links

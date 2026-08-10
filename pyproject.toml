@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brainpatch"
-version = "1.0.0"
+version = "1.1.0"
 description = "Tiny, installable activation patches for frozen language models."
 readme = "README.md"
 requires-python = ">=3.10"
