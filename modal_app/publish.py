@@ -151,7 +151,15 @@ def publish_to_huggingface(
     stage(vol / "experiments" / intervention_run, f"experiments/{intervention_run}")
 
     # -- patches ----------------------------------------------------------------
-    stage(vol / "patches", "patches")
+    # Research patches (v0.1 JSON, need the SAE) and compiled runtime artifacts
+    # (v1 .brainpatch, self-contained) are staged into separate directories so a
+    # user downloading a patch is never confused about which one they need.
+    for entry in sorted((vol / "patches").glob("*.json")):
+        stage(entry, f"patches/research/{entry.name}")
+    compiled = vol / "patches" / "compiled"
+    if compiled.is_dir():
+        for entry in sorted(compiled.glob("*.brainpatch")):
+            stage(entry, f"patches/runtime/{entry.name}")
 
     total_bytes = sum(m["bytes"] for m in manifest)
 

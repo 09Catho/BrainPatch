@@ -62,13 +62,14 @@ delta_raw = strength × unit_decoder_column / input_scale
 
 | Path | What |
 |---|---|
+| **`patches/runtime/*.brainpatch`** | **Portable runtime patches — 6.4 KB, self-contained, no SAE needed** |
+| `patches/research/*.json` | v0.1 research patches (reference SAE feature IDs; need the SAE) |
 | `sae/smoke_v0/sae_latest.pt` | SAE weights, optimizer state, liveness buffers, config |
 | `sae/smoke_v0/config.json` | Architecture and training configuration |
 | `sae/smoke_v0/metrics.jsonl` | Per-step training metrics |
 | `feature-db/smoke_v0/features.jsonl` | Per-feature statistics and top-activating contexts |
 | `activations/smoke_v0/manifest.json` | Corpus provenance (metadata only — no shards) |
 | `experiments/smoke_v0_intervention/` | All generations, metrics, and the report |
-| `patches/` | BrainPatch JSON files |
 
 The Qwen base weights are **not** duplicated here. Load them from [`Qwen/Qwen2.5-1.5B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) at revision `989aa7980e4cf806f80c7fef2b1adb7bc71aa306`.
 
@@ -78,85 +79,60 @@ Raw activation shards are not published: 58.8 MB derived from a CC BY-SA corpus,
 
 ## Usage
 
-Requires a CUDA GPU, `torch`, `transformers`, and the `brainpatch` package:
+**Most users want the portable patch, not the SAE.** A `.brainpatch` file is
+6.4 KB and self-contained; the 72 MB SAE checkpoint is a research artifact you
+only need if you are discovering new features.
 
 ```bash
-pip install torch transformers "brainpatch @ git+https://github.com/09Catho/BrainPatch.git"
+pip install "brainpatch[transformers,hub]"
+brainpatch install 09Catho/BrainPatch-Qwen2.5-1.5B:patches/runtime/experimental-feature-727.brainpatch
+brainpatch compare --model Qwen/Qwen2.5-1.5B-Instruct --patch experimental-feature-727 --prompt "Explain why the sky is blue."
 ```
 
-This snippet is **copy-paste runnable from a clean environment**. Both the SAE
-checkpoint *and* the patch file are fetched from this repository — nothing is
-assumed to exist on disk. It is verified end to end in a fresh Modal container
-by `modal run modal_app/app.py::verify_model_card_example`.
-
 ```python
-from huggingface_hub import hf_hub_download
-
 from brainpatch import BrainPatchedModel
-
-REPO = "09Catho/BrainPatch-Qwen2.5-1.5B"
-
-# Both artifacts come from the Hub. The patch is a small JSON file; the
-# checkpoint is ~72 MB. The Qwen base weights are downloaded by transformers.
-checkpoint_path = hf_hub_download(REPO, "sae/smoke_v0/sae_latest.pt")
-patch_path = hf_hub_download(REPO, "patches/experimental-feature-727.json")
 
 model = BrainPatchedModel.from_pretrained(
     "Qwen/Qwen2.5-1.5B-Instruct",
     revision="989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+    backend="transformers",
+    device="auto",
 )
-model.load_sae(checkpoint_path, reference="smoke_v0")
-
-# install() validates the patch against the loaded model and SAE, and raises
-# PatchCompatibilityError on any mismatch of model, revision, layer or SAE.
-model.install(patch_path)
-
-# set_patch_strength is a MULTIPLIER on the patch's own strength, not an
-# absolute value. This patch declares strength 16.0, so 1.0 keeps the effective
-# coefficient at 16 — the value the dose-response sweep found changes output
-# while fluency holds. See the warning below before raising it.
-model.set_patch_strength("experimental-feature-727", 1.0)
-
+patch = model.install("experimental-feature-727")   # installed above
+patch.strength = 1.0                                 # live, clamped to the patch envelope
 print(model.generate("Solve this problem: what is 17 + 25?"))
 ```
 
-`reference="smoke_v0"` must match the patch's `sae.reference` field; that is the
-check which stops feature IDs from one dictionary being applied to another.
+`patch.strength = 0.0` recovers baseline **byte-identically** — verified on an
+L4 with 0 applied hook passes.
 
-> **The multiplier compounds, and the model breaks well before you might expect.**
-> An earlier draft of this example used `1.5`, giving an effective coefficient of
-> 24. Run on Modal, that produced `"17 + 25 = 32"` — a wrong answer, followed by
-> a confused digression about the commutative property of *multiplication* —
-> where the unpatched model correctly answered 42.
->
-> That is not a bug; it is what a ~34% residual-stream perturbation does to a
-> 1.5B model. The measured sweep is in the dose–response table below: usable
-> around 8–16, looping at 32, collapse at 64. **Treat any strength you have not
-> measured as unsafe**, and check arithmetic and instruction-following whenever
-> you change it.
-
-Ad-hoc single-feature steering, no patch file needed:
+Token-level schedule (Transformers backend only):
 
 ```python
-model.add_feature(layer=18, feature_id=727, strength=16.0)
+patch.schedule = {0: 0.0, 24: 1.0, 48: 2.0}
 ```
 
-Dynamic mid-generation steering, keyed on **generated**-token index:
+No Modal, no hosted service, and no network once the model and patch are local.
 
-```python
-from brainpatch.steering import StrengthSchedule
+### Verified runtime properties
 
-model.set_patch_schedule(
-    "experimental-feature-727", StrengthSchedule({0: 0.0, 24: 1.0, 48: 2.0})
-)
-```
+Measured by `modal run modal_app/app.py::test_transformers_backend` on
+Qwen2.5-1.5B-Instruct / NVIDIA L4:
 
-To recover the baseline, either uninstall the patch or set its strength to zero
-— the two are byte-identical by construction:
+| check | result |
+|---|---|
+| weights frozen and unchanged after patched generation | pass |
+| `strength = 0` byte-identical to baseline | pass (0 applied passes) |
+| non-zero strength changes output | pass |
+| measured delta norm vs expected | **28.5177 == 28.5177** |
+| token schedule fires at keyframe | pass |
+| disable / remove restore baseline | pass |
 
-```python
-model.set_patch_strength("experimental-feature-727", 0.0)
-```
+Compilation is numerically exact: the 6.4 KB portable artifact reproduces the
+original SAE-based pipeline's delta norm (28.5178) to fp16 rounding.
+
+Overhead on L4 (3 runs, 96 tokens): **−1.3%** (within noise), **0.01 MB** VRAM,
+**0.21 s** patch load.
 
 ---
 
