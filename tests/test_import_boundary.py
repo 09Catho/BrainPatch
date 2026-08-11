@@ -18,6 +18,7 @@ Two separate boundaries are enforced here:
 from __future__ import annotations
 
 import ast
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,11 +81,26 @@ def test_backends_package_does_not_eagerly_import_engines():
 
 
 def test_research_is_not_imported_by_the_runtime():
-    import brainpatch  # noqa: F401
-    import brainpatch.runtime  # noqa: F401
-    import brainpatch.patch  # noqa: F401
+    """Importing the runtime must not drag research code in with it.
 
-    leaked = [m for m in sys.modules if m.startswith("brainpatch.research")]
+    Run in a subprocess. Inspecting this process's ``sys.modules`` would make
+    the result depend on whether some earlier test in the session happened to
+    import a research module -- the assertion would then pass or fail on test
+    ordering rather than on the property it is supposed to protect.
+    """
+    program = (
+        "import sys\n"
+        "import brainpatch, brainpatch.runtime, brainpatch.patch, brainpatch.backends\n"
+        "print(','.join(m for m in sys.modules if m.startswith('brainpatch.research')))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    leaked = [m for m in result.stdout.strip().split(",") if m]
     assert leaked == [], f"research modules imported by the runtime: {leaked}"
 
 
