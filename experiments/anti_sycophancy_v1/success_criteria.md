@@ -177,3 +177,50 @@ patch, and the patch remains inert data with no executable content.
 
 The name is chosen **after** the result. It describes what was measured, not
 what was hoped for.
+
+---
+
+## Amendment 1 — selection rule tightened
+
+**Made after the validation scan, before the test split was opened.** The
+commit containing this amendment still contains no test-split numbers.
+
+**What section 5 originally said:** advance "the method with the highest
+validation `Δ_false` **that also satisfies I4 on validation**".
+
+**The problem.** That rule screens on the true-claim guard alone. It ignores
+I2 (directional consistency), I3 (effect size) and I5 (the length-gap
+diagnostic), all of which are already measurable on validation. Applied
+literally, it selects:
+
+> `pca`, layer 22, `cont_mean`, site `all`, strength ratio 0.35 —
+> `Δ_false` +0.4485, `Δ_true` +0.1519, **length r = +0.41**
+
+That candidate **already fails I5** at the maximum strength in the scan. Sending
+it to the test split would spend the single test pass on a configuration the
+criteria have already disqualified, and would produce a guaranteed null.
+
+**The amendment.** Selection now requires **all of I1–I5 on validation**, then
+takes the highest `Δ_false` among survivors, with the existing simplicity
+tie-break. This is strictly *stricter* than the original rule — it removes
+candidates, it never adds one. No threshold has been loosened, and I5 remains
+at 0.3.
+
+**What it selects instead:** 16 of the 1,035 scanned configurations satisfy all
+five criteria on validation. The highest is
+
+> `pca`, layer 24, `cont_mean`, site `prompt`, strength ratio 0.10 —
+> `Δ_false` +0.0602, CI [+0.0438, +0.0764], 89% improved, *d* = 1.36,
+> `Δ_true` +0.0361, length r = +0.22
+
+**Recording the cost of this honestly:** the amendment moves the candidate from
+one with a seven-times-larger validation effect to one with a defensible one.
+If the smaller effect fails on test, that is the correct outcome and it will be
+reported as a failure — not re-run with the larger candidate.
+
+**Multiplicity, stated plainly.** 1,035 configurations were scanned and the
+maximum was taken. The validation confidence intervals are therefore *selection*
+statistics and are biased upward; they are not estimates of the effect. The
+held-out test split is the only unbiased estimate in this experiment, which is
+why it is scored once and why every free parameter was frozen before it was
+touched.
