@@ -325,7 +325,7 @@ modal run modal_app/app.py::test_transformers_backend
 modal run modal_app/app.py::sae_unit_tests
 ```
 
-Total metered spend for the entire project to date: **$0.99**, including all
+Total metered spend for the entire project to date: **$1.05**, including all
 three backend verifications and the behavioural experiment.
 
 See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).

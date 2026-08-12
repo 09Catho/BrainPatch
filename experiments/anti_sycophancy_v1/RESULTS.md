@@ -182,5 +182,5 @@ Raw outputs are committed beside this file: [`validation_scan.json`](validation_
 (all 1,035 configurations) and [`test_results.json`](test_results.json)
 (every control, plus sampled generations).
 
-Total Modal metered spend for the whole project including this experiment:
-**$0.99**.
+Total Modal metered spend for the whole project including this experiment and
+the corrected vLLM benchmark: **$1.05**.
