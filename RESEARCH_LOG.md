@@ -790,3 +790,76 @@ Re-ordered after the selection-rule root cause was found.
 5. Only then consider `serious_v1`. Scaling an SAE whose features are selected
    by a broken rule, on the wrong corpus, mostly buys a better model of the
    wrong thing.
+
+---
+
+# `anti_sycophancy_v1` — a properly powered attempt, and a negative result
+
+Full write-up and raw artifacts:
+[`experiments/anti_sycophancy_v1/`](experiments/anti_sycophancy_v1/).
+Criteria were [pre-registered](experiments/anti_sycophancy_v1/success_criteria.md)
+and committed before the test split was scored.
+
+## What changed from the previous attempt
+
+The earlier anti-sycophancy run had 20 items, no true-assertion control, and one
+discovery method. Every one of those was load-bearing:
+
+- **198 distinct propositions**, 134 false and 64 true, 13 categories, 78 train / 42 validation / 78 test. No proposition is restated in a second wording, so the item count is a count of independent observations and the bootstrap interval means what it says.
+- **True-assertion controls** in every split. Without them a direction that simply increases disagreement scores as increased independence — which is exactly what both SAE variants turned out to do.
+- **Four discovery methods** on identical splits: difference-of-means (CAA), PCA, a linear probe, and SAE features single and sparse.
+- **1,035 configurations** scanned on validation: 7 layers × 3 extraction positions × 3 injection sites × 5 strengths, calibrated to the residual norm the model naturally carries at each layer.
+
+## The baseline justified the dataset
+
+Qwen2.5-1.5B-Instruct preferred the sycophantic continuation on **31 of 53**
+false-claim test items (mean per-token margin −0.129) while correctly preferring
+agreement on true ones (+0.239). The behaviour is present and asymmetric in the
+way the target describes; the dataset is not measuring an already-solved problem.
+
+## Result
+
+The selected direction — PCA, layer 24, extraction `cont_mean`, injection on
+prompt tokens, strength 10% of median residual norm — produced on the held-out
+test split:
+
+- `Δ_false` **+0.0744**, CI [+0.0637, +0.0850], **94%** of items improved, *d* = 1.84
+- `Δ_true` **+0.0391**, CI [+0.0085, +0.0717] — not contrarian
+- beat the best of **10** scale-matched random directions (+0.0305) and all three unrelated real directions
+- reversed under sign inversion (−0.0477)
+- cost **2.02%** perplexity on neutral text
+
+And failed anyway, on two pre-registered criteria:
+
+- **length-gap correlation +0.457**, over the 0.3 threshold. The dataset's desired responses are longer in ~96% of pairs, and per-item gain tracks that gap. Per-token normalisation, the two-polarity design and random controls were all insufficient to separate the effect from a preference for longer text.
+- **free generation moved the wrong way**: correction rate 5.7% → 3.8%. A 0.074 nat/token log-probability preference does not change what a greedy decoder emits.
+
+The shuffled-label control also failed, though not in the dangerous direction:
+its effect was significantly *negative* (−0.011) rather than zero, most likely
+because permuting labels leaves the length asymmetry partly intact. A pipeline
+manufacturing the target effect from noise would have produced a *positive*
+result there.
+
+## Three findings that outlive the null
+
+1. **The SAE was the worst method tested.** Beaten by PCA, probe and CAA, and both SAE variants failed the true-claim guard. This project began as an SAE product; the honest measurement says the dictionary is not what makes steering work here.
+2. **Probe accuracy is not steerability.** 100% training separation, mediocre steering. Mean probe accuracy across the grid was 0.949 with essentially no relationship to effect.
+3. **Injection site dominates.** Prompt-token steering was ~6× stronger than generated-token steering (+0.44 vs +0.067 max). The intervention that llama.cpp and vLLM can both express is the more effective one.
+
+## What would settle it
+
+Length-balanced response pairs first — that single authoring change is what
+would make the disqualifying criterion informative instead of fatal. Then a
+stance judge instead of a keyword rubric (the rubric scores "Yes, you're
+correct! …the product is indeed a positive number" as agreement when the content
+corrects the user), and a second model to say whether any of this is a property
+of the behaviour or of Qwen2.5-1.5B.
+
+## Also corrected in this round
+
+The vLLM throughput benchmark reported "+82.7% throughput from patching", which
+was never published. Four separate defects: cache-warming across conditions, one
+sample per condition, fixed condition order, and — the real one — the two
+conditions generating different amounts of text, because the patch changes the
+output and completions stop at EOS at different lengths. Normalised by generated
+tokens, the honest figure is **+2.15% overhead** (60.74 → 59.43 tok/s).

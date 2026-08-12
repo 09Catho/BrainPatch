@@ -37,15 +37,16 @@ model whose weights are never touched.
 | | LoRA / fine-tune | Prompt engineering | **BrainPatch** |
 |---|---|---|---|
 | changes weights | yes | no | **no** |
-| artifact size | MB – GB | n/a | **6.4 KB** (measured, below) |
+| artifact size | MB – GB | n/a | **6.7 KB** (measured, below) |
 | costs context | no | yes, every call | **no** |
 | adjustable at runtime | no | crudely | **yes, continuously** |
 | removable mid-session | no | yes | **yes** |
 | changeable *during* generation | no | no | **yes** (token schedules) |
 
-Measured on the reference patch in this repository: **6,523 bytes**, against
+Measured on the reference patch in this repository: **6,856 bytes**, against
 **3,087,467,144 bytes** of Qwen2.5-1.5B-Instruct weights — a ratio of
-**473,320×**. Runtime overhead on an L4 was **−1.3% (within noise)** and
+**450,331×**. Runtime overhead on an L4 was **−1.3% (within noise)** on
+Transformers and **+2.2% (tokens/second)** on vLLM, with
 **0.01 MB** of extra VRAM.
 
 ## Read this before using the example patch
@@ -59,6 +60,28 @@ of the format and runtime, at `evidence_level: none`. See
 [RESEARCH_LOG.md](RESEARCH_LOG.md).
 
 BrainPatch will not name a patch after a behaviour it has not demonstrated.
+
+## What the behavioural research has established
+
+`anti_sycophancy_v1` is the properly powered attempt: 198 distinct propositions
+across 13 categories, topic-disjoint splits, **true-assertion controls** so that
+"disagree with everything" cannot score as independence, four discovery methods
+on identical splits, criteria [pre-registered](experiments/anti_sycophancy_v1/success_criteria.md)
+before the test split was opened, and the test split scored **once**.
+
+**It returned a negative result, and no behavioural patch ships.** The selected
+direction beat all ten scale-matched random directions, beat three unrelated
+real directions, reversed under sign inversion and cost 2% perplexity — but its
+per-item effect correlated **+0.457** with response-length gap, over the 0.3
+threshold set in advance, and free generation moved the wrong way. Full
+write-up, including the numbers that looked good:
+[experiments/anti_sycophancy_v1/RESULTS.md](experiments/anti_sycophancy_v1/RESULTS.md).
+
+Three findings from that run are worth more than the null:
+
+- **The SAE came last.** Both SAE variants were beaten by PCA, by a linear probe and by difference-of-means, and both failed the true-claim control by making the model disagree with *true* statements. BrainPatch started as an SAE project; on this task the SAE was the worst option available.
+- **Probe accuracy is not steerability.** A probe separating the classes at **100%** accuracy steered worse than PCA, which uses no labels when fitting. Readable and pushable are different properties.
+- **Where you inject beats almost everything else.** Steering prompt tokens was ~**6×** more effective than steering generated tokens — so the one-shot, prompt-time intervention that llama.cpp and vLLM can both express is the *better* placement, not a degraded fallback.
 
 ---
 
@@ -302,7 +325,7 @@ modal run modal_app/app.py::test_transformers_backend
 modal run modal_app/app.py::sae_unit_tests
 ```
 
-Total metered spend for the entire project to date: **$0.77**, including all
+Total metered spend for the entire project to date: **$0.99**, including all
 three backend verifications and the behavioural experiment.
 
 See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).
@@ -310,7 +333,7 @@ See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).
 ## Testing
 
 ```bash
-pytest                                          # 277 pure-Python tests, no ML stack
+pytest                                          # 350 pure-Python tests, no ML stack
 modal run modal_app/app.py::sae_unit_tests      # SAE maths (needs torch)
 modal run modal_app/app.py::test_transformers_backend   # real-model acceptance
 ```
@@ -342,7 +365,7 @@ brainpatch/
 ├── schemas/      v0.1 research patch, SAE config, manifests
 └── research/     SAE training, extraction, discovery, validation
 modal_app/        research + integration-test orchestration (optional)
-tests/            277 pure-Python tests · tests/remote/ needs torch
+tests/            350 pure-Python tests · tests/remote/ needs torch
 ```
 
 ## Links
