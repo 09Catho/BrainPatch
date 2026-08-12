@@ -69,6 +69,100 @@ COMPATIBILITY_STATES = ("verified", "experimental", "implemented", "unsupported"
 #: on output quality at best.
 ABSOLUTE_MAX_STRENGTH = 1024.0
 
+#: How a direction was found. Recorded because it turned out to matter: on the
+#: one behavioural task measured so far, PCA, a linear probe, difference-of-means
+#: and an SAE feature produced very different directions from identical data, and
+#: a patch that does not say which it used cannot be compared with another.
+KNOWN_DISCOVERY_METHODS = (
+    "caa",
+    "pca",
+    "probe",
+    "sae_single",
+    "sae_sparse",
+    "handwritten",
+    "other",
+)
+
+#: Where the direction was read off during discovery.
+KNOWN_EXTRACTION_POSITIONS = ("last_prompt", "cont_mean", "cont_last", "all_tokens", "other")
+
+#: Where the runtime adds it. This is not cosmetic: measured effect differed by
+#: roughly 6x between steering prompt tokens and steering generated tokens.
+KNOWN_INJECTION_SITES = ("prompt", "continuation", "all")
+
+#: Provenance is documentation, not payload. The cap is what stops a patch from
+#: carrying its training set: a few kilobytes of description is provenance, a
+#: megabyte of it is a dataset with extra steps.
+PROVENANCE_MAX_BYTES = 16_384
+
+#: Keys that would smuggle example text into an artifact. A patch ships a
+#: direction and the facts needed to audit it -- never the data it was fit on.
+FORBIDDEN_PROVENANCE_KEYS = frozenset(
+    {"examples", "prompts", "dataset", "training_data", "samples", "corpus", "responses"}
+)
+
+
+def validate_provenance(provenance: dict[str, Any]) -> None:
+    """Check the optional provenance block.
+
+    Every field is optional -- an older patch with an empty block stays valid --
+    but a field that *is* present has to mean what it says. A misrecorded layer
+    or discovery method is worse than an absent one, because it looks like
+    an audit trail.
+    """
+    if not provenance:
+        return
+    if not isinstance(provenance, dict):
+        raise PatchFormatError("provenance must be an object")
+
+    offending = sorted(FORBIDDEN_PROVENANCE_KEYS & {str(k).lower() for k in provenance})
+    if offending:
+        raise PatchFormatError(
+            f"provenance may not carry training data; remove {offending}. A patch "
+            "records how it was made, not what it was made from."
+        )
+
+    encoded = len(json.dumps(provenance, ensure_ascii=False).encode("utf-8"))
+    if encoded > PROVENANCE_MAX_BYTES:
+        raise PatchFormatError(
+            f"provenance is {encoded} bytes, over the {PROVENANCE_MAX_BYTES} byte cap"
+        )
+
+    method = provenance.get("discovery_method")
+    if method is not None and method not in KNOWN_DISCOVERY_METHODS:
+        raise PatchFormatError(
+            f"unknown discovery_method {method!r}; expected one of {KNOWN_DISCOVERY_METHODS}"
+        )
+
+    position = provenance.get("extraction_position")
+    if position is not None and position not in KNOWN_EXTRACTION_POSITIONS:
+        raise PatchFormatError(
+            f"unknown extraction_position {position!r}; "
+            f"expected one of {KNOWN_EXTRACTION_POSITIONS}"
+        )
+
+    site = provenance.get("injection_site")
+    if site is not None and site not in KNOWN_INJECTION_SITES:
+        raise PatchFormatError(
+            f"unknown injection_site {site!r}; expected one of {KNOWN_INJECTION_SITES}"
+        )
+
+    digest = provenance.get("training_dataset_hash")
+    if digest is not None:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise PatchFormatError(
+                "training_dataset_hash must be a lowercase hex sha256 digest, so a "
+                f"reader can check which data produced this direction; got {digest!r}"
+            )
+
+    layer = provenance.get("discovery_layer")
+    if layer is not None and (not isinstance(layer, int) or isinstance(layer, bool) or layer < 0):
+        raise PatchFormatError(f"discovery_layer must be a non-negative integer, got {layer!r}")
+
+    calibration = provenance.get("strength_calibration")
+    if calibration is not None and not isinstance(calibration, dict):
+        raise PatchFormatError("strength_calibration must be an object")
+
 
 class PatchFormatError(ValueError):
     """The artifact is malformed, unsupported, or internally inconsistent."""
@@ -256,6 +350,8 @@ class Manifest:
                 f"default_strength {self.default_strength} exceeds the patch's own "
                 f"max_abs_strength {self.max_abs_strength}"
             )
+
+        validate_provenance(self.provenance)
 
         for backend, entry in self.compatibility.items():
             status = entry.get("status")
