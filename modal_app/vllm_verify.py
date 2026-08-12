@@ -292,17 +292,83 @@ def verify_vllm_server(
     checks["matching_per_request_strength_accepted"] = status_ok == 200
 
     # --- throughput ------------------------------------------------------------
-    def timed(n: int = 4) -> float:
+    # An earlier version of this benchmark measured patched once, then baseline
+    # once, using identical prompts. That produced "+82.7% throughput from
+    # patching", which is not a real effect: the second condition read a prefix
+    # cache the first condition had just warmed, and one sample per condition
+    # cannot separate that from noise anyway. The number was never published.
+    #
+    # Three changes make the comparison mean something:
+    #   1. Every measurement uses **unique prompts**, so no measurement can be
+    #      served from another measurement's prefix cache.
+    #   2. A discarded **warmup** absorbs first-request costs.
+    #   3. Conditions are **interleaved** and repeated, and the reported figure
+    #      is the median, so drift over the run cannot masquerade as an effect.
+    # A fourth correction, found by re-running the "fixed" benchmark and still
+    # getting an impossible -46%: the two conditions do not generate the same
+    # amount of text. The patch changes the output, so completions stop at EOS
+    # at different lengths, and seconds-per-request silently compares different
+    # amounts of work. The comparable quantity is **tokens per second**.
+    def timed(tag: str, n: int = 4) -> tuple[float, int]:
         start = time.perf_counter()
         with ThreadPoolExecutor(max_workers=n) as pool:
-            list(pool.map(lambda i: chat(f"Count to three. Request {i}."), range(n)))
-        return time.perf_counter() - start
+            responses = list(
+                pool.map(lambda i: chat(f"Count to three. Trial {tag} request {i}."), range(n))
+            )
+        elapsed = time.perf_counter() - start
+        tokens = sum(
+            int(body.get("usage", {}).get("completion_tokens", 0)) for _, body in responses
+        )
+        return elapsed, tokens
 
-    patched_seconds = timed()
-    backend.end_serving()
-    model.backend.set_enabled(patch_name, False)
-    backend.begin_serving()
-    baseline_seconds = timed()
+    def set_patch(enabled: bool) -> None:
+        backend.end_serving()
+        model.backend.set_enabled(patch_name, enabled)
+        backend.begin_serving()
+
+    timed("warmup-a")
+    timed("warmup-b")
+
+    repetitions = 3
+    baseline_samples: list[float] = []
+    patched_samples: list[float] = []
+    baseline_tokens: list[int] = []
+    patched_tokens: list[int] = []
+
+    def measure(enabled: bool, tag: str) -> None:
+        set_patch(enabled)
+        seconds, tokens = timed(tag)
+        (patched_samples if enabled else baseline_samples).append(seconds)
+        (patched_tokens if enabled else baseline_tokens).append(tokens)
+
+    for rep in range(repetitions):
+        # Alternate which condition goes first. With a fixed order, whichever
+        # condition always runs second inherits any warming left by the first.
+        if rep % 2 == 0:
+            measure(False, f"base-{rep}")
+            measure(True, f"patch-{rep}")
+        else:
+            measure(True, f"patch-{rep}")
+            measure(False, f"base-{rep}")
+
+    def median(values: list[float]) -> float:
+        ordered = sorted(values)
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[middle]
+        return (ordered[middle - 1] + ordered[middle]) / 2
+
+    baseline_seconds = median(baseline_samples)
+    patched_seconds = median(patched_samples)
+    baseline_rate = median(
+        [t / s for s, t in zip(baseline_samples, baseline_tokens) if s > 0]
+    )
+    patched_rate = median([t / s for s, t in zip(patched_samples, patched_tokens) if s > 0])
+    # If the server reports no token usage, tokens/second is undefined and the
+    # only honest thing to publish is nothing. Do not silently fall back to
+    # seconds-per-request -- that is the comparison that produced the bogus
+    # number in the first place.
+    rates_usable = baseline_rate > 0 and patched_rate > 0
 
     server.should_exit = True
     thread.join(timeout=30)
@@ -314,12 +380,36 @@ def verify_vllm_server(
         "checks": checks,
         "throughput": {
             "concurrent_requests": 4,
-            "baseline_seconds": round(baseline_seconds, 3),
-            "patched_seconds": round(patched_seconds, 3),
-            "overhead_percent": round(
+            "repetitions": repetitions,
+            "interleaved": True,
+            "unique_prompts_per_measurement": True,
+            "warmups_discarded": 2,
+            "baseline_seconds_samples": [round(v, 3) for v in baseline_samples],
+            "patched_seconds_samples": [round(v, 3) for v in patched_samples],
+            "baseline_completion_tokens": baseline_tokens,
+            "patched_completion_tokens": patched_tokens,
+            "baseline_seconds_median": round(baseline_seconds, 3),
+            "patched_seconds_median": round(patched_seconds, 3),
+            "tokens_per_second_available": rates_usable,
+            "baseline_tokens_per_second_median": round(baseline_rate, 2) if rates_usable else None,
+            "patched_tokens_per_second_median": round(patched_rate, 2) if rates_usable else None,
+            "overhead_percent_tokens_per_second": (
+                round((baseline_rate - patched_rate) / baseline_rate * 100, 2)
+                if rates_usable
+                else None
+            ),
+            "wall_clock_seconds_percent_not_comparable": round(
                 (patched_seconds - baseline_seconds) / baseline_seconds * 100, 2
             ),
-            "caveat": "4 concurrent requests, single measurement; noise dominates small differences.",
+            "caveat": (
+                "Report tokens/second, not seconds/request: the patch changes the output, "
+                "so completions end at EOS at different lengths and seconds-per-request "
+                "compares different amounts of work. 3 repetitions of 4 concurrent "
+                "requests, condition order alternated, unique prompts per measurement, "
+                "2 warmups discarded, medians reported. Still a small-sample wall-clock "
+                "measurement on a shared cloud GPU: treat anything inside the spread of "
+                "the per-condition samples as noise, not as an effect."
+            ),
         },
     }
     print(json.dumps(result, indent=2, ensure_ascii=False)[:6000])

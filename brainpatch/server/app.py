@@ -170,7 +170,12 @@ def build_app(model: Any, served_model_name: Optional[str] = None) -> Any:
                 stream_chat(prompt, cfg, system, model_name), media_type="text/event-stream"
             )
         text = model.generate(prompt, cfg, system=system)
-        return chat_response(text, model_name)
+        return chat_response(
+            text,
+            model_name,
+            prompt_tokens=count_tokens(model.backend, prompt),
+            completion_tokens=count_tokens(model.backend, text),
+        )
 
     @api.post("/v1/completions")
     def completions(request: CompletionRequest) -> Dict[str, Any]:
@@ -213,7 +218,37 @@ def build_app(model: Any, served_model_name: Optional[str] = None) -> Any:
     return api
 
 
-def chat_response(text: str, model_name: str) -> Dict[str, Any]:
+def count_tokens(backend: Any, text: str) -> int:
+    """Token count for ``text``, or 0 if the backend cannot tokenise.
+
+    Reported zeros were a real problem, not a cosmetic one: any client that
+    meters usage, or any benchmark that normalises by generated tokens, silently
+    reads "nothing happened". Falling back to 0 is still possible for backends
+    with no tokenizer, but a backend that has one now reports the truth.
+    """
+    tokenizer = getattr(backend, "tokenizer", None)
+    if tokenizer is None:
+        # vLLM keeps its tokenizer behind the engine handle rather than exposing
+        # an attribute, so a plain getattr finds nothing and every count would
+        # come back 0 on the backend most likely to be metered.
+        engine = getattr(backend, "llm", None)
+        getter = getattr(engine, "get_tokenizer", None)
+        if callable(getter):
+            try:
+                tokenizer = getter()
+            except Exception:
+                tokenizer = None
+    if tokenizer is None:
+        return 0
+    try:
+        return len(tokenizer(text, add_special_tokens=False).input_ids)
+    except Exception:
+        return 0
+
+
+def chat_response(
+    text: str, model_name: str, *, prompt_tokens: int = 0, completion_tokens: int = 0
+) -> Dict[str, Any]:
     return {
         "id": "chatcmpl-" + uuid.uuid4().hex[:24],
         "object": "chat.completion",
@@ -226,5 +261,9 @@ def chat_response(text: str, model_name: str) -> Dict[str, Any]:
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
     }
