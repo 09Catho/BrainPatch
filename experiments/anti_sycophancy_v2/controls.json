@@ -1,0 +1,17 @@
+{
+ "run": false,
+ "reason": "Controls (>=10 norm-matched random directions, >=3 screened unrelated real directions, sign flip, shuffled-label discovery) are defined against the test split and were not run, because no candidate reached the test split.",
+ "specified_controls": {
+  "random_directions": ">=10, norm-matched",
+  "unrelated_real_directions": ">=3, screened on cosine, activation overlap, behavioural correlation, top-context overlap",
+  "sign_control": "negated direction must reverse the effect",
+  "shuffled_label_control": "must not produce a credible positive effect comparable to the real direction; see success_criteria.md section 2 for the corrected criterion"
+ },
+ "validation_side_controls_that_did_run": {
+  "true_claim_guard": "applied to every one of the 330 scanned configurations; 303 were rejected, the majority for making the model disagree with true statements",
+  "length_gap_correlation": {
+   "max_abs_over_all_configurations": 0.43016997576573507,
+   "mean_abs": 0.12850156694803228
+  }
+ }
+}

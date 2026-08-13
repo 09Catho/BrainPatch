@@ -1,0 +1,8 @@
+{
+ "opened": false,
+ "reason": "No configuration passed the pre-registered stage-2 selection rule: none of the six shortlisted survivors improved the free-generation correction rate on validation. Section 4 of success_criteria.md states that the test split is then never opened and the experiment reports a negative result.",
+ "test_split_size": 155,
+ "test_split_sha256": "eccd57732c5f97d23c78d696d207a471e8c114bd528adc03893bafdbdbdd370b",
+ "gates_evaluated": null,
+ "note": "The test split remains unscored and unseen. It is therefore still usable as a genuinely held-out set for a future pre-registered experiment on this dataset."
+}

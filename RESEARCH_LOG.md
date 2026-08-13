@@ -863,3 +863,84 @@ sample per condition, fixed condition order, and — the real one — the two
 conditions generating different amounts of text, because the patch changes the
 output and completions stop at EOS at different lengths. Normalised by generated
 tokens, the honest figure is **+2.15% overhead** (60.74 → 59.43 tok/s).
+
+---
+
+# `anti_sycophancy_v2` — the confound is fixed, and the metric turns out to be the problem
+
+Full write-up: [`experiments/anti_sycophancy_v2/`](experiments/anti_sycophancy_v2/).
+Pre-registered before any test access. **Negative result; the test split was
+never opened and is still unscored.**
+
+## The dataset fix worked
+
+v1 died on a length confound: the preferred response was longer in ~96% of pairs
+and per-item steering gain correlated **+0.457** with that gap. v2 authored 387
+fresh propositions — **zero** shared topics or assertions with v1 — each pair
+written to a declared length polarity and then trimmed to near-parity.
+
+| | v1 | v2 |
+|---|---|---|
+| preferred longer | 96% | **53%** |
+| mean gap | one-directional | **+0.28 tokens** |
+| class predicts length | +0.10 | **+0.023** |
+| result-level `corr(Δ, gap)` | +0.457 (disqualifying) | mean **0.129** over 330 configurations |
+
+The audit is a **gate**, not a report: `scripts/build_sycophancy_v2.py` refuses
+to emit the dataset if it fails, and a token-level audit runs on Modal before
+any activation is captured. Both fired during development — the token audit
+caught that my own criterion (`|median gap| / mean length ≤ 0.05`) was
+unsatisfiable for an integer gap on ~14-token continuations, which is recorded
+as Amendment 1 along with the fact that it is a relaxation in ratio terms.
+
+## The finding
+
+330 configurations, five methods, 27 survivors of the true-claim guard. Free
+generation on every survivor:
+
+```
+corr(normalized Δ_false, free-generation correction gain) = −0.298
+configurations improving generation:                        7 / 27
+best correction gain:                                      +0.068  (from a WEAK log-prob config)
+top 8 by log-prob effect →  mean correction gain  −0.023
+top 8 by correction gain →  mean log-prob effect  +0.069
+```
+
+**Ranking directions by paired log-probability anti-selects for generation
+improvement.** The pre-registered shortlist rule ranks by `Δ_false`, so it
+sampled exactly the configurations least likely to pass the generation gate, and
+none of the six did — which closed the test split.
+
+This retro-explains v1 completely. v1's winner had a strong log-prob effect
+(+0.074 on test, CI excluding zero, beating ten random directions, three
+unrelated directions and reversing under sign flip) and a **falling** correction
+rate, 5.7% → 3.8%. That was not bad luck; it is what this correlation predicts.
+
+## Method ordering changed; two lessons held
+
+**CAA > PCA > probe > SAE single > SAE sparse.** Difference-of-means wins on the
+clean dataset where PCA won on the confounded one, and takes 21 of 27 survivors.
+What replicated:
+
+- **Probe accuracy is not steerability.** Up to **100%** predictive accuracy (mean 0.937) at half CAA's steering strength.
+- **SAE is last**, in both experiments.
+- **Injection site dominates**: prompt +0.355, prompt+generated +0.306, generated-only **−0.0002**. Steering generated tokens does essentially nothing.
+
+## Most "working" directions are just contrarian
+
+Only 27 of 330 configurations passed the true-claim guard. The strongest
+log-prob movers have `Δ_true` of −0.24 (CAA) and −0.46 (PCA): they make the
+model disagree with **true** statements too. Without true-assertion controls
+those would have been the headline results.
+
+## What v3 should do
+
+Select on generation from the start. The useful directions live in the *weak*
+tail of the log-prob ranking, which no log-probability-first search will
+surface. The best candidate seen (CAA, layer 16, `last_prompt`, prompt-site,
+ratio 0.35; validation correction 18.2% → 25.0%) is a **hypothesis, not a
+result** — promoting it here would be exactly the post-hoc selection the
+protocol exists to prevent. It should be a pre-registered prediction in a fresh
+experiment with its own test split.
+
+Modal spend for v2: **$0.31**; project total **$1.37** of $10.

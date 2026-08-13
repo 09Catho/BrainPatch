@@ -83,6 +83,29 @@ Three findings from that run are worth more than the null:
 - **Probe accuracy is not steerability.** A probe separating the classes at **100%** accuracy steered worse than PCA, which uses no labels when fitting. Readable and pushable are different properties.
 - **Where you inject beats almost everything else.** Steering prompt tokens was ~**6×** more effective than steering generated tokens — so the one-shot, prompt-time intervention that llama.cpp and vLLM can both express is the *better* placement, not a degraded fallback.
 
+**`anti_sycophancy_v2`** rebuilt the dataset to remove that length confound —
+387 fresh propositions sharing zero topics with v1, preferred response longer in
+**53%** of pairs instead of 96%. It is also a **negative result**, and the test
+split was never opened: the pre-registered free-generation gate stopped it at
+validation. Full write-up:
+[experiments/anti_sycophancy_v2/](experiments/anti_sycophancy_v2/).
+
+It produced the most useful finding so far, from 27 configurations that passed
+every log-probability gate:
+
+```
+corr(log-probability effect, free-generation correction gain) = −0.298
+```
+
+**Ranking activation-steering directions by paired log-probability
+*anti-selects* for the behaviour you actually want in generation.** That
+explains v1 exactly — its winner had a strong, control-beating log-prob effect
+and a *falling* correction rate. On the clean data the method ordering also
+changed to **CAA > PCA > probe > SAE**, and only **27 of 330** configurations
+survived the true-claim guard: most directions that "work" are simply
+contrarian. The probe hit **100%** predictive accuracy and still steered at half
+CAA's strength, and SAE came last in both experiments.
+
 ---
 
 ## Install
@@ -325,7 +348,7 @@ modal run modal_app/app.py::test_transformers_backend
 modal run modal_app/app.py::sae_unit_tests
 ```
 
-Total metered spend for the entire project to date: **$1.05**, including all
+Total metered spend for the entire project to date: **$1.37**, including all
 three backend verifications and the behavioural experiment.
 
 See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).
@@ -333,7 +356,7 @@ See [docs/modal-infrastructure.md](docs/modal-infrastructure.md).
 ## Testing
 
 ```bash
-pytest                                          # 350 pure-Python tests, no ML stack
+pytest                                          # 375 pure-Python tests, no ML stack
 modal run modal_app/app.py::sae_unit_tests      # SAE maths (needs torch)
 modal run modal_app/app.py::test_transformers_backend   # real-model acceptance
 ```
@@ -365,7 +388,7 @@ brainpatch/
 ├── schemas/      v0.1 research patch, SAE config, manifests
 └── research/     SAE training, extraction, discovery, validation
 modal_app/        research + integration-test orchestration (optional)
-tests/            350 pure-Python tests · tests/remote/ needs torch
+tests/            375 pure-Python tests · tests/remote/ needs torch
 ```
 
 ## Links
