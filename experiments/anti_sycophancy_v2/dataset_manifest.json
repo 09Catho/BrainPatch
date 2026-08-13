@@ -1,0 +1,103 @@
+{
+ "name": "antisycophancy_v2",
+ "version": "2.0",
+ "generated_by": "scripts/build_sycophancy_v2.py",
+ "source_pool": "brainpatch/research/sycophancy_data_v2.py",
+ "n_propositions": 387,
+ "n_categories": 11,
+ "categories": [
+  "arithmetic",
+  "business_reasoning",
+  "common_misconception",
+  "engineering",
+  "factual_misconception",
+  "history",
+  "logic",
+  "misleading_causal",
+  "plausible_false",
+  "science",
+  "software"
+ ],
+ "true_control_fraction": 0.37467700258397935,
+ "split_counts": {
+  "train": {
+   "false_claim": 99,
+   "true_claim": 56,
+   "total": 155
+  },
+  "validation": {
+   "false_claim": 44,
+   "true_claim": 33,
+   "total": 77
+  },
+  "test": {
+   "false_claim": 99,
+   "true_claim": 56,
+   "total": 155
+  }
+ },
+ "sha256": {
+  "all": "559c2bcbe1d1720ec33b36fc1bb8dbceafd22a01f11fc6ae1b3f8a79294da433",
+  "train": "559a950858747b4297459cd728ad2bebdb5f4e40a931016ab6f83df4fc5d8758",
+  "validation": "f1f305ef09735b423b744417727db29e318a064be05328048553f70e52c1abb4",
+  "test": "eccd57732c5f97d23c78d696d207a471e8c114bd528adc03893bafdbdbdd370b"
+ },
+ "length_audit_characters": {
+  "global": {
+   "measure": "characters",
+   "n_pairs": 387,
+   "mean_gap": -0.9328165374677002,
+   "median_gap": 2.0,
+   "mean_gap_ratio": -0.013369627613280744,
+   "median_gap_ratio": 0.028665074162546527,
+   "label_length_corr": -0.014067179329188466,
+   "desired_longer_share": 0.5322997416020672,
+   "mean_desired_len": 69.30490956072352,
+   "mean_undesired_len": 70.23772609819122
+  },
+  "per_split": {
+   "train": {
+    "measure": "characters",
+    "n_pairs": 155,
+    "mean_gap": -0.6774193548387096,
+    "median_gap": 2.0,
+    "mean_gap_ratio": -0.009670734515311996,
+    "median_gap_ratio": 0.028551692378540182,
+    "label_length_corr": -0.010195270118142145,
+    "desired_longer_share": 0.535483870967742,
+    "mean_desired_len": 69.70967741935483,
+    "mean_undesired_len": 70.38709677419355
+   },
+   "validation": {
+    "measure": "characters",
+    "n_pairs": 77,
+    "mean_gap": -1.7792207792207793,
+    "median_gap": 0.0,
+    "mean_gap_ratio": -0.026833806679071592,
+    "median_gap_ratio": 0.0,
+    "label_length_corr": -0.03087415921975814,
+    "desired_longer_share": 0.4935064935064935,
+    "mean_desired_len": 65.41558441558442,
+    "mean_undesired_len": 67.1948051948052
+   },
+   "test": {
+    "measure": "characters",
+    "n_pairs": 155,
+    "mean_gap": -0.7677419354838709,
+    "median_gap": 2.0,
+    "mean_gap_ratio": -0.01078045024233365,
+    "median_gap_ratio": 0.028083525841373375,
+    "label_length_corr": -0.01098829793195043,
+    "desired_longer_share": 0.5483870967741935,
+    "mean_desired_len": 70.83225806451613,
+    "mean_undesired_len": 71.6
+   }
+  }
+ },
+ "near_duplicate_pairs": 0,
+ "relationship_to_v1": {
+  "shared_propositions": 0,
+  "shared_topics": 0,
+  "note": "anti_sycophancy_v1 is frozen as a negative result. Its opened test data is not reused here in any split."
+ }
+}
