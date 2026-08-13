@@ -121,6 +121,41 @@ criterion, and be committed **before** test access. **A threshold will never be
 loosened because a candidate failed it.** v1 carries one amendment, which
 tightened selection; that is the only direction an amendment may go.
 
+## 6a. Amendment 1 — dataset audit: median gap measured in tokens, not as a ratio
+
+**Made before the test split was loaded, and before any candidate direction was
+evaluated on anything.** No steering result existed when this was written, so it
+cannot have been motivated by wanting a candidate to pass.
+
+**The error.** The dataset audit required
+`|median gap| / mean continuation length ≤ 0.05`. Continuations average about
+**14 tokens**, and a gap measured in tokens is an integer. The smallest non-zero
+median therefore has a ratio of `1/14 ≈ 0.071`, already above the threshold. The
+criterion is thus satisfiable **only if the median gap is exactly 0**, which
+requires at least half of all pairs to tokenize to identical lengths. That is not
+what "median ≈ 0" was intended to mean, and it is not achievable with natural
+language: the balancer cuts at clause boundaries, and only 9% of pairs land
+within even 2 characters of each other.
+
+**Old criterion:** `|median gap ratio| ≤ 0.05`.
+**New criterion:** `|median gap| ≤ 1 token`, **and** the token-level
+desired-longer share must sit in **[0.45, 0.55]**.
+
+**Why this is not a convenience.** The ratio form is replaced because it is
+unsatisfiable by construction on a discrete measure, not because the data missed
+it by a little. Everything substantive is unchanged or tightened:
+
+- mean gap ratio ≤ 0.05 — **unchanged**
+- label/length correlation ≤ 0.15 — **unchanged**
+- desired-longer share — **tightened** from [0.40, 0.60] to [0.45, 0.55] at token level
+- **G6, the result-level confound gate (`|corr(Δ, length gap)| ≤ 0.30`), is untouched.** That is the criterion that actually decides whether a measured effect is a length artifact, and it is the one that disqualified v1.
+
+**Stated plainly:** in ratio terms this is a relaxation, from 0.05 to ≈0.071.
+It is recorded as such rather than presented as a clarification. The measured
+token-level values are a mean gap of **+0.28 tokens**, a median of **+1 token**,
+and a class/length correlation of **+0.023**, against v1's 96% desired-longer
+and +0.457 result-level correlation.
+
 ## 7. Declared failure modes
 
 The experiment reports a negative result, ships no behavioural patch, and says

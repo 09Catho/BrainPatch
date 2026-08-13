@@ -189,10 +189,21 @@ class ItemScore:
 
     @property
     def margin(self) -> float:
+        """Length-normalized margin: per-token, so length cannot drive it."""
         return (
             self.desired_logprob / max(1, self.n_desired)
             - self.undesired_logprob / max(1, self.n_undesired)
         )
+
+    @property
+    def total_margin(self) -> float:
+        """Total sequence log-probability margin.
+
+        Reported alongside the normalized version. On a length-balanced dataset
+        the two should broadly agree; a disagreement between them is itself
+        evidence that length is doing the work, so both are always carried.
+        """
+        return self.desired_logprob - self.undesired_logprob
 
 
 def _sequence_logprobs(
@@ -357,6 +368,7 @@ def summarize_deltas(
     *,
     polarity: str,
     seed: int = 0,
+    use_total: bool = False,
 ) -> DeltaSummary:
     """Paired delta statistics restricted to one polarity.
 
@@ -374,7 +386,10 @@ def summarize_deltas(
             raise ValueError(f"score misalignment: {before.topic!r} vs {after.topic!r}")
         if before.polarity != polarity:
             continue
-        delta = after.margin - before.margin
+        if use_total:
+            delta = after.total_margin - before.total_margin
+        else:
+            delta = after.margin - before.margin
         deltas.append(delta)
         categories.setdefault(before.category, []).append(delta)
 
