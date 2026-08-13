@@ -301,3 +301,297 @@ def stage_a_baseline(batch_size: int = 8) -> dict[str, Any]:
     volume.commit()
     print(f"[stage-a] wrote {path}")
     return {"audit_ok": combined["ok"], "baseline": {k: v["false_claim"] for k, v in baseline.items()}}
+
+
+@app.function(**gpu_kwargs(timeout=60 * 50, image=RESEARCH_IMAGE))
+def stage_b_discovery(seed: int = 0, batch_size: int = 8) -> dict[str, Any]:
+    """Fit on train, select on validation, in two stages. Test is never loaded.
+
+    Stage 1 filters the grid with cheap paired log-probability scoring. Stage 2
+    runs free generation on the handful of survivors, because v1's failure was
+    that log-probability and generation only diverged once the test split was
+    already spent.
+    """
+    import torch
+
+    from brainpatch.backends.transformers_backend import TransformersBackend
+    from brainpatch.paths import VolumePaths
+    from brainpatch.research.behaviour_eval import (
+        EXTRACTION_POSITIONS,
+        DirectionInjector,
+        capture_layer_activations,
+        encode_pairs,
+        fit_caa,
+        fit_pca,
+        fit_probe,
+        length_gap_correlation,
+        residual_norm_percentiles,
+        score_pairs,
+        summarize_deltas,
+    )
+
+    paths = VolumePaths(VOL_MOUNT)
+    backend = TransformersBackend()
+    backend.load_model(MODEL, revision=REVISION, device="cuda")
+    model, tokenizer = backend.model, backend.tokenizer
+    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    hidden = backend.describe_model().hidden_size
+
+    splits = _load(("train", "validation"))
+    train_pairs = encode_pairs(tokenizer, splits["train"])
+    validation_pairs = encode_pairs(tokenizer, splits["validation"])
+    print(f"[stage-b] train={len(train_pairs)} validation={len(validation_pairs)}")
+    print("[stage-b] test split deliberately not loaded")
+
+    layer_modules = {layer: model.model.layers[layer] for layer in CANDIDATE_LAYERS}
+
+    baseline = score_pairs(
+        model, validation_pairs, pad_id=pad_id, device="cuda", batch_size=batch_size
+    )
+    sanity = summarize_deltas(baseline, baseline, polarity="false_claim")
+    print(f"[stage-b] baseline sanity (must be 0): {sanity.mean:.8f}")
+
+    activations = capture_layer_activations(
+        model, layer_modules, train_pairs, pad_id=pad_id, device="cuda",
+        batch_size=batch_size,
+    )
+    norm_stats = {
+        layer: residual_norm_percentiles(
+            activations[layer]["last_prompt_desired"], percentiles=(50, 90, 95, 99)
+        )
+        for layer in CANDIDATE_LAYERS
+    }
+    for layer in CANDIDATE_LAYERS:
+        column = activations[layer]["last_prompt_desired"].float()
+        norms = torch.linalg.vector_norm(column, dim=-1)
+        norm_stats[layer]["mean"] = float(norms.mean())
+        norm_stats[layer]["std"] = float(norms.std())
+        norm_stats[layer]["max"] = float(norms.max())
+    print("[stage-b] residual norm p50: "
+          + ", ".join(f"L{l}={norm_stats[l]['p50']:.1f}" for l in CANDIDATE_LAYERS))
+
+    # ---- candidate directions, all five methods on shared activations -------
+    candidates: dict[str, torch.Tensor] = {}
+    probe_accuracy: dict[str, float] = {}
+    for layer in CANDIDATE_LAYERS:
+        for position in EXTRACTION_POSITIONS:
+            desired = activations[layer][f"{position}_desired"]
+            undesired = activations[layer][f"{position}_undesired"]
+            candidates[f"caa|{layer}|{position}"] = fit_caa(desired, undesired)
+            candidates[f"pca|{layer}|{position}"] = fit_pca(desired, undesired)
+            direction, accuracy = fit_probe(desired, undesired, seed=seed)
+            candidates[f"probe|{layer}|{position}"] = direction
+            probe_accuracy[f"probe|{layer}|{position}"] = accuracy
+
+    sae_layer = None
+    try:
+        checkpoint = torch.load(
+            str(paths.sae_checkpoint(SAE_EXPERIMENT)), map_location="cuda", weights_only=False
+        )
+        from brainpatch.research.ml.sae import TopKSAE
+
+        sae = TopKSAE.from_checkpoint(checkpoint, device="cuda")
+        sae_layer = int(sae.config.layer)
+        input_scale = float(sae.config.input_scale)
+        if sae_layer in activations:
+            for position in EXTRACTION_POSITIONS:
+                desired = activations[sae_layer][f"{position}_desired"].cuda()
+                undesired = activations[sae_layer][f"{position}_undesired"].cuda()
+                with torch.inference_mode():
+                    feat_d, _, _ = sae.encode(desired * input_scale)
+                    feat_u, _, _ = sae.encode(undesired * input_scale)
+                pooled = torch.sqrt(
+                    (feat_d.var(dim=0, unbiased=False) + feat_u.var(dim=0, unbiased=False)) / 2
+                ).clamp_min(1e-6)
+                effect = (feat_d.mean(dim=0) - feat_u.mean(dim=0)) / pooled
+                best = int(torch.argmax(effect.abs()).item())
+                sign = 1.0 if effect[best] > 0 else -1.0
+                candidates[f"sae_single|{sae_layer}|{position}"] = (
+                    sign * sae.feature_direction(best, normalize=True).cpu()
+                )
+                combination = torch.zeros(hidden)
+                for index in torch.argsort(effect.abs(), descending=True)[:8].tolist():
+                    combination += float(effect[index]) * sae.feature_direction(
+                        int(index), normalize=True
+                    ).cpu()
+                candidates[f"sae_sparse|{sae_layer}|{position}"] = combination
+            print(f"[stage-b] SAE candidates added at layer {sae_layer}")
+    except Exception as error:  # pragma: no cover - depends on volume state
+        print(f"[stage-b] SAE unavailable: {error}")
+
+    print(f"[stage-b] {len(candidates)} candidate directions")
+
+    def evaluate(vector: torch.Tensor, layer: int, site: str, strength: float) -> dict[str, Any]:
+        injector = DirectionInjector(vector.cuda(), strength).attach(layer_modules[layer])
+        try:
+            patched = score_pairs(
+                model, validation_pairs, pad_id=pad_id, device="cuda",
+                injector=injector, inject_site=site, batch_size=batch_size,
+            )
+        finally:
+            injector.remove()
+        if injector.calls == 0:
+            raise RuntimeError("hook never fired")
+        false_norm = summarize_deltas(baseline, patched, polarity="false_claim", seed=seed)
+        true_norm = summarize_deltas(baseline, patched, polarity="true_claim", seed=seed)
+        false_total = summarize_deltas(
+            baseline, patched, polarity="false_claim", seed=seed, use_total=True
+        )
+        return {
+            "delta_false": false_norm.mean,
+            "delta_false_ci": [false_norm.ci_low, false_norm.ci_high],
+            "delta_false_improved": false_norm.proportion_improved,
+            "delta_false_d": false_norm.cohens_d,
+            "delta_false_total": false_total.mean,
+            "delta_true": true_norm.mean,
+            "delta_true_ci": [true_norm.ci_low, true_norm.ci_high],
+            "length_r": length_gap_correlation(baseline, patched),
+        }
+
+    # ---- stage 1: cheap log-probability grid, primary injection site --------
+    rows: list[dict[str, Any]] = []
+    for key, direction in sorted(candidates.items()):
+        method, layer_text, position = key.split("|")
+        layer = int(layer_text)
+        for ratio in STRENGTH_RATIOS:
+            strength = ratio * norm_stats[layer]["p50"]
+            result = evaluate(direction, layer, PRIMARY_SITE, strength)
+            result.update(
+                method=method, layer=layer, position=position, site=PRIMARY_SITE,
+                strength_ratio=ratio, strength=strength,
+                probe_accuracy=probe_accuracy.get(key),
+            )
+            rows.append(result)
+    print(f"[stage-b] stage 1 scored {len(rows)} configurations at site={PRIMARY_SITE}")
+
+    def survives(r: dict[str, Any]) -> bool:
+        return (
+            r["delta_false_ci"][0] > 0
+            and r["delta_true_ci"][0] > -0.01
+            and abs(r["length_r"]) <= 0.30
+        )
+
+    # ---- injection-site verification on the strongest few -------------------
+    ranked_primary = sorted(rows, key=lambda r: r["delta_false"], reverse=True)
+    site_rows: list[dict[str, Any]] = []
+    for probe_row in ranked_primary[:3]:
+        key = f"{probe_row['method']}|{probe_row['layer']}|{probe_row['position']}"
+        for site in VERIFY_SITES:
+            if site == PRIMARY_SITE:
+                continue
+            for ratio in STRENGTH_RATIOS:
+                strength = ratio * norm_stats[probe_row["layer"]]["p50"]
+                result = evaluate(candidates[key], probe_row["layer"], site, strength)
+                result.update(
+                    method=probe_row["method"], layer=probe_row["layer"],
+                    position=probe_row["position"], site=site,
+                    strength_ratio=ratio, strength=strength,
+                    probe_accuracy=probe_accuracy.get(key),
+                )
+                site_rows.append(result)
+    rows.extend(site_rows)
+
+    by_site: dict[str, float] = {}
+    for row in rows:
+        by_site[row["site"]] = max(by_site.get(row["site"], -9e9), row["delta_false"])
+    print("[stage-b] max validation delta_false by injection site: "
+          + ", ".join(f"{k}={v:+.4f}" for k, v in sorted(by_site.items())))
+
+    by_method: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        current = by_method.get(row["method"])
+        if current is None or row["delta_false"] > current["delta_false"]:
+            by_method[row["method"]] = row
+    print("[stage-b] best validation configuration per method:")
+    for method, row in sorted(by_method.items(), key=lambda kv: -kv[1]["delta_false"]):
+        print(
+            f"  {method:<11} L{row['layer']:<3} {row['position']:<11} {row['site']:<12} "
+            f"r={row['strength_ratio']:<5} dF={row['delta_false']:+.4f} "
+            f"CI[{row['delta_false_ci'][0]:+.4f},{row['delta_false_ci'][1]:+.4f}] "
+            f"total={row['delta_false_total']:+.3f} dT={row['delta_true']:+.4f} "
+            f"len_r={row['length_r']:+.3f} acc={row.get('probe_accuracy')}"
+        )
+
+    survivors = [r for r in rows if survives(r)]
+    print(f"[stage-b] {len(survivors)} of {len(rows)} configurations survive stage 1")
+    if not survivors:
+        payload = {"rows": rows, "survivors": 0, "winner": None,
+                   "norm_stats": {str(k): v for k, v in norm_stats.items()},
+                   "probe_accuracy": probe_accuracy, "best_per_method": by_method}
+        _results_path("validation_results.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        volume.commit()
+        print("[stage-b] no survivor; per the pre-registration the test split stays closed")
+        return {"winner": None, "survivors": 0}
+
+    # ---- stage 2: free generation on the shortlist --------------------------
+    shortlist = sorted(survivors, key=lambda r: r["delta_false"], reverse=True)[:SHORTLIST_SIZE]
+    baseline_texts = _generate(
+        model, tokenizer, splits["validation"], pad_id=pad_id, batch_size=batch_size
+    )
+    baseline_generation = _generation_report(splits["validation"], baseline_texts)
+    print(f"[stage-b] validation baseline generation: {baseline_generation}")
+
+    for row in shortlist:
+        key = f"{row['method']}|{row['layer']}|{row['position']}"
+        texts = _generate(
+            model, tokenizer, splits["validation"], pad_id=pad_id,
+            vector=candidates[key], strength=row["strength"], site=row["site"],
+            layer_module=layer_modules[row["layer"]], batch_size=batch_size,
+        )
+        report = _generation_report(splits["validation"], texts)
+        row["generation"] = report
+        row["generation_gain"] = (
+            report["selective_independence_score"]
+            - baseline_generation["selective_independence_score"]
+        )
+        row["correction_gain"] = (
+            report["correction_rate_false_claims"]
+            - baseline_generation["correction_rate_false_claims"]
+        )
+        print(
+            f"[stage-b] shortlist {row['method']} L{row['layer']} {row['position']} "
+            f"{row['site']} r={row['strength_ratio']}: dF={row['delta_false']:+.4f} "
+            f"corr_rate={report['correction_rate_false_claims']:.3f} "
+            f"(gain {row['correction_gain']:+.3f}) "
+            f"false_dis={report['false_disagreement_rate_true_claims']:.3f} "
+            f"selective_gain={row['generation_gain']:+.3f} "
+            f"degen={report['degenerate_fraction']:.3f}"
+        )
+
+    eligible = [
+        r for r in shortlist
+        if r["generation_gain"] > 0 and r["correction_gain"] > 0
+    ]
+    winner = None
+    if eligible:
+        best = max(r["generation_gain"] for r in eligible)
+        close = [r for r in eligible if best - r["generation_gain"] <= 0.02]
+        order = {"caa": 0, "pca": 1, "probe": 2, "sae_single": 3, "sae_sparse": 4}
+        winner = sorted(close, key=lambda r: order.get(r["method"], 9))[0]
+        print(f"[stage-b] FROZEN CONFIGURATION: {winner['method']} L{winner['layer']} "
+              f"{winner['position']} site={winner['site']} ratio={winner['strength_ratio']}")
+    else:
+        print("[stage-b] no shortlisted configuration improved free generation; "
+              "per the pre-registration the test split stays closed")
+
+    payload = {
+        "model": MODEL,
+        "dataset": DATASET,
+        "seed": seed,
+        "n_train": len(train_pairs),
+        "n_validation": len(validation_pairs),
+        "norm_stats": {str(k): v for k, v in norm_stats.items()},
+        "probe_accuracy": probe_accuracy,
+        "sae_layer": sae_layer,
+        "rows": rows,
+        "best_per_method": by_method,
+        "max_delta_false_by_site": by_site,
+        "baseline_generation": baseline_generation,
+        "shortlist": shortlist,
+        "winner": winner,
+    }
+    path = _results_path("validation_results.json")
+    path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    volume.commit()
+    print(f"[stage-b] wrote {path}")
+    return {"winner": winner, "survivors": len(survivors), "best_per_method": by_method}
