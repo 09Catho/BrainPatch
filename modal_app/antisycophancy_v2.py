@@ -595,3 +595,162 @@ def stage_b_discovery(seed: int = 0, batch_size: int = 8) -> dict[str, Any]:
     volume.commit()
     print(f"[stage-b] wrote {path}")
     return {"winner": winner, "survivors": len(survivors), "best_per_method": by_method}
+
+
+@app.function(**gpu_kwargs(timeout=60 * 50, image=RESEARCH_IMAGE))
+def stage_b_dissociation(seed: int = 0, batch_size: int = 8) -> dict[str, Any]:
+    """EXPLORATORY: free generation for *every* stage-1 survivor, not just the
+    pre-registered shortlist.
+
+    This cannot change the outcome and cannot promote anything. The
+    pre-registered selection rule already resolved the experiment when no
+    shortlisted configuration improved generation, and the test split stays
+    closed regardless of what this produces.
+
+    Its only purpose is to answer a question the writeup needs: is the gap
+    between paired log-probability and actual generation a knife-edge miss by
+    six configurations, or a systematic property of these directions? v1 saw the
+    same dissociation once, at test time, with no way to tell which it was.
+    """
+    import torch
+
+    from brainpatch.backends.transformers_backend import TransformersBackend
+    from brainpatch.paths import VolumePaths
+    from brainpatch.research.behaviour_eval import (
+        EXTRACTION_POSITIONS,
+        capture_layer_activations,
+        encode_pairs,
+        fit_caa,
+        fit_pca,
+        fit_probe,
+        residual_norm_percentiles,
+    )
+
+    scan = json.loads(_results_path("validation_results.json").read_text(encoding="utf-8"))
+    survivors = [
+        r for r in scan["rows"]
+        if r["delta_false_ci"][0] > 0
+        and r["delta_true_ci"][0] > -0.01
+        and abs(r["length_r"]) <= 0.30
+    ]
+    print(f"[dissoc] {len(survivors)} stage-1 survivors to characterise")
+
+    paths = VolumePaths(VOL_MOUNT)
+    backend = TransformersBackend()
+    backend.load_model(MODEL, revision=REVISION, device="cuda")
+    model, tokenizer = backend.model, backend.tokenizer
+    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    hidden = backend.describe_model().hidden_size
+
+    splits = _load(("train", "validation"))
+    train_pairs = encode_pairs(tokenizer, splits["train"])
+    layer_modules = {layer: model.model.layers[layer] for layer in CANDIDATE_LAYERS}
+    activations = capture_layer_activations(
+        model, layer_modules, train_pairs, pad_id=pad_id, device="cuda", batch_size=batch_size
+    )
+
+    candidates: dict[str, torch.Tensor] = {}
+    for layer in CANDIDATE_LAYERS:
+        for position in EXTRACTION_POSITIONS:
+            d = activations[layer][f"{position}_desired"]
+            u = activations[layer][f"{position}_undesired"]
+            candidates[f"caa|{layer}|{position}"] = fit_caa(d, u)
+            candidates[f"pca|{layer}|{position}"] = fit_pca(d, u)
+            candidates[f"probe|{layer}|{position}"] = fit_probe(d, u, seed=seed)[0]
+    try:
+        from brainpatch.research.ml.sae import TopKSAE
+
+        checkpoint = torch.load(
+            str(paths.sae_checkpoint(SAE_EXPERIMENT)), map_location="cuda", weights_only=False
+        )
+        sae = TopKSAE.from_checkpoint(checkpoint, device="cuda")
+        sae_layer, input_scale = int(sae.config.layer), float(sae.config.input_scale)
+        for position in EXTRACTION_POSITIONS:
+            d = activations[sae_layer][f"{position}_desired"].cuda()
+            u = activations[sae_layer][f"{position}_undesired"].cuda()
+            with torch.inference_mode():
+                fd, _, _ = sae.encode(d * input_scale)
+                fu, _, _ = sae.encode(u * input_scale)
+            pooled = torch.sqrt(
+                (fd.var(dim=0, unbiased=False) + fu.var(dim=0, unbiased=False)) / 2
+            ).clamp_min(1e-6)
+            effect = (fd.mean(dim=0) - fu.mean(dim=0)) / pooled
+            best = int(torch.argmax(effect.abs()).item())
+            sign = 1.0 if effect[best] > 0 else -1.0
+            candidates[f"sae_single|{sae_layer}|{position}"] = (
+                sign * sae.feature_direction(best, normalize=True).cpu()
+            )
+            comb = torch.zeros(hidden)
+            for index in torch.argsort(effect.abs(), descending=True)[:8].tolist():
+                comb += float(effect[index]) * sae.feature_direction(int(index), normalize=True).cpu()
+            candidates[f"sae_sparse|{sae_layer}|{position}"] = comb
+    except Exception as error:  # pragma: no cover
+        print(f"[dissoc] SAE unavailable: {error}")
+
+    base_texts = _generate(
+        model, tokenizer, splits["validation"], pad_id=pad_id, batch_size=batch_size
+    )
+    base = _generation_report(splits["validation"], base_texts)
+    print(f"[dissoc] baseline correction={base['correction_rate_false_claims']:.3f} "
+          f"selective={base['selective_independence_score']:+.3f}")
+
+    rows: list[dict[str, Any]] = []
+    for index, row in enumerate(sorted(survivors, key=lambda r: -r["delta_false"])):
+        key = f"{row['method']}|{row['layer']}|{row['position']}"
+        texts = _generate(
+            model, tokenizer, splits["validation"], pad_id=pad_id,
+            vector=candidates[key], strength=row["strength"], site=row["site"],
+            layer_module=layer_modules[row["layer"]], batch_size=batch_size,
+        )
+        report = _generation_report(splits["validation"], texts)
+        entry = {
+            "method": row["method"], "layer": row["layer"], "position": row["position"],
+            "site": row["site"], "strength_ratio": row["strength_ratio"],
+            "delta_false": row["delta_false"], "delta_true": row["delta_true"],
+            "length_r": row["length_r"],
+            "correction_rate": report["correction_rate_false_claims"],
+            "correction_gain": report["correction_rate_false_claims"]
+            - base["correction_rate_false_claims"],
+            "false_disagreement": report["false_disagreement_rate_true_claims"],
+            "selective_gain": report["selective_independence_score"]
+            - base["selective_independence_score"],
+            "degenerate_fraction": report["degenerate_fraction"],
+            "mean_chars": report["mean_chars"],
+        }
+        rows.append(entry)
+        print(
+            f"[dissoc] {index + 1:>2}/{len(survivors)} {entry['method']:<11} L{entry['layer']:<3} "
+            f"{entry['position']:<11} {entry['site']:<12} r={entry['strength_ratio']:<5} "
+            f"dF={entry['delta_false']:+.4f} corr_gain={entry['correction_gain']:+.3f} "
+            f"sel_gain={entry['selective_gain']:+.3f} degen={entry['degenerate_fraction']:.2f}"
+        )
+
+    xs = [r["delta_false"] for r in rows]
+    ys = [r["correction_gain"] for r in rows]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    num = sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+    den = (sum((a - mx) ** 2 for a in xs) ** 0.5) * (sum((b - my) ** 2 for b in ys) ** 0.5)
+    corr = num / den if den else 0.0
+    improved = sum(1 for r in rows if r["correction_gain"] > 0)
+
+    print(f"[dissoc] corr(delta_false, correction_gain) = {corr:+.3f}")
+    print(f"[dissoc] configurations improving generation: {improved}/{len(rows)}")
+    print(f"[dissoc] best correction gain seen: {max(ys):+.3f}")
+
+    payload = {
+        "note": (
+            "EXPLORATORY. Cannot promote any configuration. The pre-registered "
+            "selection rule already closed the test split."
+        ),
+        "baseline_generation": base,
+        "rows": rows,
+        "corr_delta_false_vs_correction_gain": corr,
+        "n_improving_generation": improved,
+        "n_survivors": len(rows),
+        "best_correction_gain": max(ys),
+    }
+    path = _results_path("dissociation_diagnostic.json")
+    path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    volume.commit()
+    print(f"[dissoc] wrote {path}")
+    return {"corr": corr, "improved": improved, "n": len(rows), "best_gain": max(ys)}
