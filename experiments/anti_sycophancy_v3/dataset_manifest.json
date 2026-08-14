@@ -1,0 +1,105 @@
+{
+ "name": "antisycophancy_v3",
+ "version": "3.0",
+ "generated_by": "scripts/build_sycophancy_v3.py",
+ "source_pool": "brainpatch/research/sycophancy_data_v3.py",
+ "n_propositions": 550,
+ "n_categories": 11,
+ "categories": [
+  "business",
+  "causal_misconception",
+  "engineering",
+  "factual_misconception",
+  "history",
+  "logic",
+  "mathematics",
+  "plausible_wrong",
+  "science",
+  "software",
+  "technical_misconception"
+ ],
+ "true_control_fraction": 0.4,
+ "split_counts": {
+  "train": {
+   "false_claim": 120,
+   "true_claim": 80,
+   "total": 200
+  },
+  "validation": {
+   "false_claim": 90,
+   "true_claim": 60,
+   "total": 150
+  },
+  "test": {
+   "false_claim": 120,
+   "true_claim": 80,
+   "total": 200
+  }
+ },
+ "sha256": {
+  "all": "bc744dd92c35c2e668df2a80a7841dae80af445288e82395900f8a724e0f84bc",
+  "train": "3f72e97c262cf146e3bd35e789d67b71c96c5de94adea7dfdd4227bc5a01c343",
+  "validation": "453a1a3471980a730b87a95e67790b956068ccae13960d28f63ca925488fb1ec",
+  "test": "5852e515f0e814d66315e5659675a43eb7b6ba411c10c3634b87e92619a16347"
+ },
+ "length_audit_characters": {
+  "global": {
+   "measure": "characters",
+   "n_pairs": 550,
+   "mean_gap": 1.9163636363636363,
+   "median_gap": 1.5,
+   "mean_gap_ratio": 0.03070200990387416,
+   "median_gap_ratio": 0.02403145936498689,
+   "label_length_corr": 0.0428990474154015,
+   "desired_longer_share": 0.509090909090909,
+   "mean_desired_len": 63.376363636363635,
+   "mean_undesired_len": 61.46
+  },
+  "per_split": {
+   "train": {
+    "measure": "characters",
+    "n_pairs": 200,
+    "mean_gap": 1.78,
+    "median_gap": 1.0,
+    "mean_gap_ratio": 0.028950150443197528,
+    "median_gap_ratio": 0.016264129462470522,
+    "label_length_corr": 0.040118192802555415,
+    "desired_longer_share": 0.51,
+    "mean_desired_len": 62.375,
+    "mean_undesired_len": 60.595
+   },
+   "validation": {
+    "measure": "characters",
+    "n_pairs": 150,
+    "mean_gap": 1.4866666666666666,
+    "median_gap": 0.5,
+    "mean_gap_ratio": 0.023772720004264163,
+    "median_gap_ratio": 0.007995309418474495,
+    "label_length_corr": 0.033038821272205414,
+    "desired_longer_share": 0.5,
+    "mean_desired_len": 63.28,
+    "mean_undesired_len": 61.79333333333334
+   },
+   "test": {
+    "measure": "characters",
+    "n_pairs": 200,
+    "mean_gap": 2.375,
+    "median_gap": 2.5,
+    "mean_gap_ratio": 0.03754198774945663,
+    "median_gap_ratio": 0.03951788184153329,
+    "label_length_corr": 0.0531841286502228,
+    "desired_longer_share": 0.515,
+    "mean_desired_len": 64.45,
+    "mean_undesired_len": 62.075
+   }
+  }
+ },
+ "near_duplicate_pairs": 0,
+ "overlap_with_previous_experiments": {
+  "v1_shared_topics": 0,
+  "v1_shared_assertions": 0,
+  "v2_shared_topics": 0,
+  "v2_shared_assertions": 0,
+  "note": "anti_sycophancy_v1 and v2 are frozen. v1's test split was opened; v2's was never opened and stays sealed. Neither is reused here."
+ }
+}
