@@ -817,12 +817,58 @@ def stage_c_test(batch_size: int = 12) -> dict[str, Any]:
     )
     strength = ratio * norms["p50"]
 
+    def sae_direction(
+        desired_acts: Any, undesired_acts: Any, variant: str
+    ) -> Any:
+        """Refit an SAE direction by contrast effect size on the given labels.
+
+        Kept as a closure so the shuffled-label control can reuse the *same*
+        selection procedure on permuted labels. A control that skipped feature
+        selection would not be testing the pipeline that produced the result.
+        """
+        from brainpatch.research.ml.sae import TopKSAE
+
+        checkpoint = torch.load(
+            str(VolumePaths(VOL_MOUNT).sae_checkpoint(SAE_EXPERIMENT)),
+            map_location="cuda", weights_only=False,
+        )
+        sae = TopKSAE.from_checkpoint(checkpoint, device="cuda")
+        if int(sae.config.layer) != layer:
+            raise RuntimeError(
+                f"frozen configuration targets layer {layer} but the SAE is at "
+                f"layer {sae.config.layer}"
+            )
+        scale = float(sae.config.input_scale)
+        with torch.inference_mode():
+            feat_d, _, _ = sae.encode(desired_acts.cuda() * scale)
+            feat_u, _, _ = sae.encode(undesired_acts.cuda() * scale)
+        pooled = torch.sqrt(
+            (feat_d.var(dim=0, unbiased=False) + feat_u.var(dim=0, unbiased=False)) / 2
+        ).clamp_min(1e-6)
+        effect = (feat_d.mean(dim=0) - feat_u.mean(dim=0)) / pooled
+        if variant == "sae_single":
+            best = int(torch.argmax(effect.abs()).item())
+            sign = 1.0 if effect[best] > 0 else -1.0
+            return sign * sae.feature_direction(best, normalize=True).cpu(), best
+        combination = torch.zeros(hidden)
+        for index in torch.argsort(effect.abs(), descending=True)[:8].tolist():
+            combination += float(effect[index]) * sae.feature_direction(
+                int(index), normalize=True
+            ).cpu()
+        return combination, None
+
+    from brainpatch.paths import VolumePaths
+
+    sae_feature_id = None
     if method == "caa":
         direction = fit_caa(desired, undesired)
     elif method == "pca":
         direction = fit_pca(desired, undesired)
     elif method == "probe":
         direction, _ = fit_probe(desired, undesired, seed=seed)
+    elif method in ("sae_single", "sae_sparse"):
+        direction, sae_feature_id = sae_direction(desired, undesired, method)
+        print(f"[stage-c] refit {method}: feature_id={sae_feature_id}")
     else:
         raise RuntimeError(f"stage C cannot refit method {method!r}")
     unit = direction / torch.linalg.vector_norm(direction)
@@ -963,9 +1009,23 @@ def stage_c_test(batch_size: int = 12) -> dict[str, Any]:
     }
     print(f"[stage-c] sign flipped: gain={controls['sign_flipped']['correction_gain']:+.3f}")
 
-    shuffled_vector = shuffled_label_direction(
-        desired, undesired, method=method if method in ("caa", "pca") else "caa", seed=seed
-    )
+    # The shuffled-label control must run the *same* discovery procedure on
+    # permuted labels, including SAE feature selection. Substituting a different
+    # method here would test something other than the pipeline under scrutiny.
+    if method in ("sae_single", "sae_sparse"):
+        generator = torch.Generator().manual_seed(seed)
+        stacked = torch.cat([desired, undesired], dim=0)
+        permutation = torch.randperm(len(stacked), generator=generator)
+        half = len(desired)
+        shuffled_vector, shuffled_feature = sae_direction(
+            stacked[permutation[:half]], stacked[permutation[half:]], method
+        )
+        print(f"[stage-c] shuffled-label {method}: feature_id={shuffled_feature} "
+              f"(real was {sae_feature_id})")
+    else:
+        shuffled_vector = shuffled_label_direction(
+            desired, undesired, method=method if method in ("caa", "pca") else "caa", seed=seed
+        )
     shuffled_vector = shuffled_vector / torch.linalg.vector_norm(shuffled_vector)
     shuffled = run(shuffled_vector, "shuffled_labels")
     shuffled_correct = flags(shuffled["texts"], "false_claim", "CORRECT_CHALLENGE")
@@ -1047,6 +1107,7 @@ def stage_c_test(batch_size: int = 12) -> dict[str, Any]:
 
     payload = {
         "configuration": config,
+        "sae_feature_id": sae_feature_id,
         "strength": strength,
         "norm_stats": norms,
         "n_test": len(test_examples),
