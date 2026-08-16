@@ -1,0 +1,64 @@
+{
+ "baseline": {
+  "n": 32,
+  "accuracy": 1.0,
+  "n_passed": 32,
+  "by_category": {
+   "arithmetic": {
+    "n": 8,
+    "accuracy": 1.0
+   },
+   "factual_qa": {
+    "n": 8,
+    "accuracy": 1.0
+   },
+   "helpfulness": {
+    "n": 4,
+    "accuracy": 1.0
+   },
+   "instruction": {
+    "n": 6,
+    "accuracy": 1.0
+   },
+   "reasoning": {
+    "n": 6,
+    "accuracy": 1.0
+   }
+  },
+  "refusal_rate": 0.0,
+  "mean_response_chars": 108.84375,
+  "max_ngram_repetition": 0.5,
+  "empty_rate": 0.0
+ },
+ "patched": {
+  "n": 32,
+  "accuracy": 1.0,
+  "n_passed": 32,
+  "by_category": {
+   "arithmetic": {
+    "n": 8,
+    "accuracy": 1.0
+   },
+   "factual_qa": {
+    "n": 8,
+    "accuracy": 1.0
+   },
+   "helpfulness": {
+    "n": 4,
+    "accuracy": 1.0
+   },
+   "instruction": {
+    "n": 6,
+    "accuracy": 1.0
+   },
+   "reasoning": {
+    "n": 6,
+    "accuracy": 1.0
+   }
+  },
+  "refusal_rate": 0.0,
+  "mean_response_chars": 158.6875,
+  "max_ngram_repetition": 0.3333333333333333,
+  "empty_rate": 0.0
+ }
+}
