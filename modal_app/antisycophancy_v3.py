@@ -1312,7 +1312,9 @@ def _generate_via_backend(backend: Any, examples: Any, pad_id: int, batch_size: 
     """
     from brainpatch.runtime.base import GenerationConfig
 
+    # do_sample is derived from temperature on this config, so temperature=0.0
+    # is what makes decoding greedy -- matching the experiment exactly.
     config = GenerationConfig(
-        max_new_tokens=GENERATION_KWARGS["max_new_tokens"], do_sample=False
+        max_new_tokens=GENERATION_KWARGS["max_new_tokens"], temperature=0.0
     )
     return [backend.generate(e.prompt, config) for e in examples]
