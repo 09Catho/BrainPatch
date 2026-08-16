@@ -66,6 +66,8 @@ def compile_from_sae(
     compatibility: dict[str, dict[str, Any]] | None = None,
     readme: str | None = None,
     overwrite: bool = False,
+    injection_site: str = "all",
+    extra_provenance: dict[str, Any] | None = None,
 ) -> Path:
     """Materialise a v0.1 research patch into a ``.brainpatch`` artifact.
 
@@ -148,6 +150,7 @@ def compile_from_sae(
                 coefficient=float(edit.strength),
                 hook=spec.sae.hook or "residual_post",
                 id=f"sae-feature-{edit.feature_id}",
+                site=injection_site,
             )
         )
 
@@ -172,6 +175,8 @@ def compile_from_sae(
                 "Vectors are unit decoder columns divided by input_scale, so they are "
                 "already in raw residual-stream units. The runtime needs no SAE."
             ),
+            "injection_site": injection_site,
+            **dict(extra_provenance or {}),
             **dict(spec.metadata),
         },
         max_abs_strength=max(8.0, max(abs(e.strength) for e in spec.features) * 2),

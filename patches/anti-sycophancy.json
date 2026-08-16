@@ -1,0 +1,117 @@
+{
+  "format_version": "0.1",
+  "name": "anti-sycophancy",
+  "description": "Anti-sycophancy patch. SAE feature 204 (smoke_v0 dictionary, layer 18), injected at PROMPT TOKENS ONLY at 0.35 of the median residual norm. Earned its behavioural name by passing all 11 gates pre-registered in experiments/anti_sycophancy_v3/success_criteria.md before the held-out test split was opened. On 200 unseen items the free-generation correction rate on false user assertions rose from 0.233 to 0.400 (+0.167 absolute, +71.4% relative, bootstrap CI [+0.092, +0.242]); paired over the same 120 false-claim items, 22 improved, 2 worsened, 96 unchanged, exact McNemar p=3.6e-05. Response length changed +0.21%, no degeneration, utility battery unchanged (32/32 both conditions, zero refusals). IMPORTANT CAVEAT: the best of ten norm-matched random directions scored +0.158 against this direction's +0.167 -- a margin of about one item in 120 -- and the random null spans -0.133 to +0.158. The effect size is well established; the DIRECTION-SPECIFICITY is not. Treat this as one adequately-powered controlled experiment, not as a replicated result.",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "model_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "sae": {
+    "reference": "smoke_v0",
+    "layer": 18,
+    "hook": "residual_post",
+    "d_in": 1536,
+    "d_sae": 2048,
+    "input_scale": 0.5610531069008018,
+    "sha256": null
+  },
+  "features": [
+    {
+      "feature_id": 204,
+      "strength": 12.562076,
+      "mode": "add"
+    }
+  ],
+  "schedule": null,
+  "evidence_level": "controlled_interventional",
+  "evaluation": {
+    "experiment": "anti_sycophancy_v3",
+    "primary_metric": "free-generation correction rate on false user assertions",
+    "selection_target": "generated behaviour, never continuation log-probability",
+    "dataset": {
+      "name": "antisycophancy_v3",
+      "n_propositions": 550,
+      "splits": {
+        "train": 200,
+        "validation": 150,
+        "test": 200
+      },
+      "true_control_fraction": 0.4,
+      "overlap_with_v1_v2": "zero topics, zero assertions"
+    },
+    "test": {
+      "n": 200,
+      "correction_rate_baseline": 0.2333,
+      "correction_rate_patched": 0.4,
+      "correction_gain": 0.1667,
+      "correction_gain_ci95": [
+        0.0917,
+        0.2417
+      ],
+      "correction_gain_relative": 0.7143,
+      "sis_gain": 0.1167,
+      "false_disagreement_increase_true_claims": 0.05,
+      "paired_mcnemar": {
+        "improved": 22,
+        "worsened": 2,
+        "unchanged": 96,
+        "n_discordant": 24,
+        "p_value": 3.5881996154785156e-05
+      },
+      "mean_length_change": 0.00206,
+      "degenerate_rate": 0.0
+    },
+    "controls": {
+      "random_directions_n": 10,
+      "random_max_gain": 0.1583,
+      "random_min_gain": -0.1333,
+      "margin_over_best_random": 0.0083,
+      "unrelated_max_gain": 0.025,
+      "sign_flipped_gain": -0.075,
+      "shuffled_label_gain": -0.1083,
+      "zero_strength_identical_to_baseline": true
+    },
+    "utility": {
+      "n": 32,
+      "accuracy_baseline": 1.0,
+      "accuracy_patched": 1.0,
+      "refusal_rate_patched": 0.0
+    },
+    "logprob_diagnostic_delta_false": -0.0136,
+    "logprob_note": "NEGATIVE. The paired log-probability margin gets slightly worse while free generation improves by 71%. Log-probability was used only as a diagnostic and never to select.",
+    "gates": {
+      "G1_correction_improves": true,
+      "G2_sis_improves": true,
+      "G3_false_disagreement_bounded": true,
+      "G4_beats_random": true,
+      "G5_beats_unrelated": true,
+      "G6_sign_control": true,
+      "G7_shuffled_control": true,
+      "G8_no_degeneration": true,
+      "G9_utility_preserved": true,
+      "G10_measured_in_generation": true,
+      "G11_not_length": true
+    },
+    "limitations": [
+      "margin over the best of 10 random directions is ~1 item in 120",
+      "true-claim false-disagreement rose from 1/80 to 5/80, exactly at the +0.05 gate",
+      "single model, single dataset; replication was pre-declared out of scope",
+      "keyword-based stance evaluator: scores stance, not factual correctness of the correction"
+    ]
+  },
+  "license": "Apache-2.0",
+  "authors": [],
+  "metadata": {
+    "discovery_method": "sae_single",
+    "discovery_layer": 18,
+    "extraction_position": "last_prompt",
+    "injection_site": "prompt",
+    "normalization": "unit_l2_decoder_column_divided_by_input_scale",
+    "training_dataset_hash": "3f72e97c262cf146e3bd35e789d67b71c96c5de94adea7dfdd4227bc5a01c343",
+    "test_dataset_hash": "5852e515f0e814d66315e5659675a43eb7b6ba411c10c3634b87e92619a16347",
+    "strength_calibration": {
+      "basis": "median_residual_norm_at_layer",
+      "ratio": 0.35,
+      "p50_residual_norm": 63.9719,
+      "injected_norm_residual_units": 22.39017
+    }
+  }
+}

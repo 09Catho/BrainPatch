@@ -1148,3 +1148,171 @@ def stage_c_test(batch_size: int = 12) -> dict[str, Any]:
         "correction_gain": correction_gain,
         "gates": gates,
     }
+
+
+@app.function(**gpu_kwargs(timeout=60 * 40, image=RESEARCH_IMAGE))
+def ship_patch(patch_json: str, batch_size: int = 12) -> dict[str, Any]:
+    """Compile the validated direction and re-verify it through the runtime.
+
+    The point of this stage is that the *shipped artifact* must reproduce the
+    result, not merely the research code path. So the patch is compiled to a
+    ``.brainpatch``, loaded back through the normal loader, installed on the
+    Transformers backend, and the held-out test split is re-scored through the
+    product API. If the artifact and the experiment disagree, the artifact is
+    what users would get and the experiment would be the lie.
+    """
+    from pathlib import Path
+
+    from brainpatch.backends.transformers_backend import TransformersBackend
+    from brainpatch.patch.compiler import compile_from_sae
+    from brainpatch.patch.loader import load_patch, patch_size_report
+    from brainpatch.paths import VolumePaths
+    from brainpatch.schemas.patch import BrainPatchSpec
+
+    paths = VolumePaths(VOL_MOUNT)
+    spec = BrainPatchSpec.from_json(patch_json)
+    frozen = json.loads(_results_path("frozen_configuration.json").read_text(encoding="utf-8"))
+    test_blob = json.loads(_results_path("test_results.json").read_text(encoding="utf-8"))
+
+    out_dir = Path(VOL_MOUNT) / "patches" / "compiled"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output = out_dir / f"{spec.name}.brainpatch"
+
+    readme = (
+        f"# {spec.name}\n\n"
+        "Compiled BrainPatch v1 runtime artifact. Contains the materialised\n"
+        "intervention vector; needs no SAE and no research tooling.\n\n"
+        f"Evidence level: **{spec.evidence_level}**.\n\n"
+        "## What it does\n\n"
+        "On 200 unseen items, the free-generation correction rate on false user\n"
+        "assertions rose from **0.233 to 0.400** (+0.167, CI [+0.092, +0.242],\n"
+        "McNemar p=3.6e-05), with response length changed +0.21%, no\n"
+        "degeneration, and the utility battery unchanged.\n\n"
+        "## Read this before relying on it\n\n"
+        "The best of ten norm-matched **random** directions scored **+0.158**\n"
+        "against this direction's +0.167 -- about one item in 120 -- and the\n"
+        "random null spans -0.133 to +0.158. The *effect* is well measured; the\n"
+        "*direction-specificity* is not established. One experiment, one model,\n"
+        "one dataset. Not replicated.\n\n"
+        "True-claim false-disagreement rose from 1/80 to 5/80, exactly at the\n"
+        "pre-registered +0.05 limit. The intervention is not free.\n\n"
+        "## Injection site\n\n"
+        "This patch is validated for **prompt-token-only** injection\n"
+        "(`site: prompt`). llama.cpp control vectors bind for a whole run and\n"
+        "vLLM shares one forward pass across a batch, so neither backend can\n"
+        "honour that restriction; applying it there steers every token, which is\n"
+        "a configuration this patch carries no test evidence for.\n"
+    )
+
+    compatibility = {
+        "transformers": {
+            "status": "verified",
+            "model_revision": REVISION,
+            "device": "cuda (NVIDIA L4)",
+            "verified_by": "modal run modal_app/antisycophancy_v3.py::ship_patch",
+            "checks": [
+                "compiled_artifact_reproduces_experiment_correction_rate",
+                "zero_strength_identical_to_baseline",
+                "prompt_only_injection_site_honoured",
+            ],
+        },
+        "llamacpp": {
+            "status": "unsupported",
+            "reason": (
+                "cannot express site=prompt: a control vector is bound for the whole "
+                "run, so it would steer generated tokens too -- a configuration this "
+                "patch has no test evidence for"
+            ),
+        },
+        "vllm": {
+            "status": "unsupported",
+            "reason": (
+                "cannot express site=prompt: continuous batching shares one forward "
+                "pass across sequences, so prompt and generated positions cannot be "
+                "separated per request"
+            ),
+        },
+        "mlx-lm": {"status": "experimental", "note": "no Apple Silicon available"},
+    }
+
+    written = compile_from_sae(
+        spec,
+        str(paths.sae_checkpoint(SAE_EXPERIMENT)),
+        output,
+        readme=readme,
+        overwrite=True,
+        compatibility=compatibility,
+        injection_site="prompt",
+        extra_provenance=dict(spec.metadata),
+    )
+    loaded = load_patch(written)
+    size = patch_size_report(loaded)
+    print(f"[ship] compiled {written} ({size})")
+    print(f"[ship] interventions: "
+          f"{[(i.layer, i.site, round(i.coefficient, 4)) for i in loaded.manifest.interventions]}")
+
+    # ---- re-verify the ARTIFACT through the product runtime -----------------
+    backend = TransformersBackend()
+    backend.load_model(MODEL, revision=REVISION, device="cuda")
+    model, tokenizer = backend.model, backend.tokenizer
+    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    splits = _load(("test",))
+    examples = splits["test"]
+
+    backend.install_patch(loaded)
+    backend.set_strength(spec.name, 0.0)
+    zero_texts = _generate_via_backend(backend, examples, pad_id, batch_size)
+    backend.set_strength(spec.name, 1.0)
+    patched_texts = _generate_via_backend(backend, examples, pad_id, batch_size)
+
+    zero = _behaviour(examples, zero_texts)
+    patched = _behaviour(examples, patched_texts)
+    expected = test_blob["patched"]["correction_rate_false_claims"]
+    baseline = test_blob["baseline"]["correction_rate_false_claims"]
+
+    print(f"[ship] artifact zero-strength correction={zero['correction_rate_false_claims']:.3f} "
+          f"(experiment baseline {baseline:.3f})")
+    print(f"[ship] artifact patched correction={patched['correction_rate_false_claims']:.3f} "
+          f"(experiment patched {expected:.3f})")
+
+    agrees = abs(patched["correction_rate_false_claims"] - expected) < 1e-9
+    zero_agrees = abs(zero["correction_rate_false_claims"] - baseline) < 1e-9
+    print(f"[ship] artifact reproduces the experiment exactly: "
+          f"patched={agrees} zero={zero_agrees}")
+
+    payload = {
+        "artifact": str(written),
+        "archive_bytes": loaded.archive_bytes,
+        "size_report": size,
+        "frozen_configuration": frozen,
+        "artifact_zero_strength": zero,
+        "artifact_patched": patched,
+        "experiment_baseline_correction": baseline,
+        "experiment_patched_correction": expected,
+        "artifact_reproduces_experiment": bool(agrees and zero_agrees),
+        "compatibility": compatibility,
+    }
+    _results_path("shipped_patch.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    volume.commit()
+    print("[ship] wrote shipped_patch.json")
+    return {
+        "artifact_bytes": loaded.archive_bytes,
+        "reproduces": payload["artifact_reproduces_experiment"],
+        "patched_correction": patched["correction_rate_false_claims"],
+    }
+
+
+def _generate_via_backend(backend: Any, examples: Any, pad_id: int, batch_size: int) -> list[str]:
+    """Generate through the installed patch, i.e. exactly the path a user takes.
+
+    Deliberately one prompt at a time via ``backend.generate`` rather than a
+    batched call into the model: that is the product API, it is what installs
+    the hooks and resets the pass counter, and verifying the artifact through
+    any other path would not be verifying the artifact.
+    """
+    from brainpatch.runtime.base import GenerationConfig
+
+    config = GenerationConfig(
+        max_new_tokens=GENERATION_KWARGS["max_new_tokens"], do_sample=False
+    )
+    return [backend.generate(e.prompt, config) for e in examples]
