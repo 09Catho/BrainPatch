@@ -82,4 +82,15 @@ the top 5 were confirmed on the full validation split. That confirmation step
 mattered: probe and PCA candidates that looked strong on the 60-item ranking
 subset (+0.167, +0.139) collapsed to +0.011 and +0.000 on full validation.
 
-Modal spend for v3: **$0.51**; project total **$1.88** of $10.
+## Shipped
+
+`anti-sycophancy.brainpatch` — **7,382 bytes**, `controlled_interventional`,
+one intervention at layer 18 with `site: prompt`.
+
+Transformers is marked **`implemented`**, not `verified`: the behaviour was
+measured on that backend in stage C, but the artifact-level reproduction check
+did not complete within budget. llama.cpp and vLLM are **`unsupported`** —
+neither can express prompt-token-only injection, so applying it there would be
+a configuration with no test evidence.
+
+Modal spend for v3: **$0.66**; project total **$2.03** of $10.

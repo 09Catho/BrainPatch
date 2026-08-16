@@ -206,4 +206,25 @@ modal run modal_app/antisycophancy_v3.py::stage_b_discovery
 modal run modal_app/antisycophancy_v3.py::stage_c_test
 ```
 
-Modal spend for v3: **$0.51** (project total $1.37 → **$1.88** of $10).
+Modal spend for v3: **$0.66** (project total $1.37 → **$2.03** of $10).
+
+## 12. What shipped, and what the artifact does not claim
+
+`anti-sycophancy.brainpatch`, **7,382 bytes**, `evidence_level:
+controlled_interventional`, discovery method `sae_single`, one intervention at
+layer 18 with `site: prompt`. Full provenance is in the manifest, including the
+training-split hash and the strength calibration.
+
+Backend statuses are deliberately conservative:
+
+| Backend | Status | Why |
+|---|---|---|
+| Transformers | `implemented` | the behaviour was measured on this backend in stage C, but the **artifact-level** reproduction check (loading the compiled file and driving it through `backend.generate`) did not complete within budget, so the stronger word is not used |
+| llama.cpp | `unsupported` | a control vector binds for a whole run; it cannot express `site: prompt` |
+| vLLM | `unsupported` | continuous batching shares one forward pass, so prompt and generated positions cannot be separated |
+| MLX-LM | `experimental` | no Apple Silicon available |
+
+The validated configuration is therefore **not** portable across engines today.
+That is a real limitation of the result, not a packaging detail: the two
+backends that cannot express it would silently apply the direction to every
+token, a configuration with no test evidence behind it.

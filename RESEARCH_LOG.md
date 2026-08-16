@@ -1037,8 +1037,13 @@ evidence behind it.
 
 ## Shipped
 
-`anti-sycophancy.brainpatch`, 7,157 bytes, `evidence_level:
+`anti-sycophancy.brainpatch`, **7,382 bytes**, `evidence_level:
 controlled_interventional`, discovery method `sae_single`. Its own README leads
 with the random-control caveat.
 
-Modal spend for v3: **$0.53**; project total **$1.90** of $10.
+Transformers is marked `implemented` rather than `verified`: the behaviour was
+measured on that backend in stage C, but the artifact-level reproduction check
+(compiled file through `backend.generate`) did not complete within budget, and
+the stronger word is reserved for checks that finish.
+
+Modal spend for v3: **$0.66**; project total **$2.03** of $10.
