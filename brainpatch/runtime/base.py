@@ -238,12 +238,24 @@ class BrainPatchBackend(ABC):
 
     # -- edit resolution -------------------------------------------------------
 
-    def resolve_edits(self, token_index: int = 0, layer: int | None = None) -> list[ResolvedEdit]:
+    def resolve_edits(
+        self,
+        token_index: int = 0,
+        layer: int | None = None,
+        *,
+        is_prompt_pass: bool | None = None,
+    ) -> list[ResolvedEdit]:
         """Vectors to add at a generated-token index.
 
         An empty list is the signal to leave activations completely untouched.
         That is what makes strength 0 identical to baseline rather than a no-op
         addition that still round-trips through floating point.
+
+        ``is_prompt_pass`` lets an intervention restrict itself to the prompt or
+        to generated tokens. Backends that cannot distinguish the two pass
+        ``None``, in which case every intervention applies and the caller is
+        responsible for knowing that a site-restricted patch is being applied
+        more broadly than it was measured.
         """
         edits: list[ResolvedEdit] = []
         for active in self._patches.values():
@@ -253,6 +265,12 @@ class BrainPatchBackend(ABC):
             for intervention in active.manifest.interventions:
                 if layer is not None and intervention.layer != layer:
                     continue
+                site = getattr(intervention, "site", "all")
+                if is_prompt_pass is not None and site != "all":
+                    if site == "prompt" and not is_prompt_pass:
+                        continue
+                    if site == "continuation" and is_prompt_pass:
+                        continue
                 coefficient = multiplier * intervention.coefficient
                 if abs(coefficient) < STRENGTH_EPSILON:
                     continue

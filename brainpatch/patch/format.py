@@ -187,6 +187,13 @@ class Intervention:
     coefficient: float = 1.0
     hook: str = "residual_post"
     id: str | None = None
+    #: Which token positions receive the vector. Added because a validated
+    #: research configuration turned out not to be expressible otherwise: v3's
+    #: result was measured with prompt-token-only injection, and a schedule
+    #: cannot encode that (the prompt pass and generated token 0 share an
+    #: index). Defaults to "all", so every previously written patch keeps its
+    #: exact meaning.
+    site: str = "all"
 
     def validate(self, *, num_layers: int | None = None) -> None:
         if self.layer < 0:
@@ -209,6 +216,11 @@ class Intervention:
             )
         if not self.vector:
             raise PatchFormatError("intervention is missing a vector reference")
+        if self.site not in KNOWN_INJECTION_SITES:
+            raise PatchFormatError(
+                f"unknown injection site {self.site!r}; expected one of "
+                f"{KNOWN_INJECTION_SITES}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -217,6 +229,8 @@ class Intervention:
             "vector": self.vector,
             "coefficient": self.coefficient,
         }
+        if self.site != "all":
+            data["site"] = self.site
         if self.id:
             data["id"] = self.id
         return data
@@ -230,6 +244,7 @@ class Intervention:
             layer=int(data["layer"]),
             vector=str(data["vector"]),
             coefficient=float(data.get("coefficient", 1.0)),
+            site=str(data.get("site", "all")),
             hook=str(data.get("hook", "residual_post")),
             id=data.get("id"),
         )

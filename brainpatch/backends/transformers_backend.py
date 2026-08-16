@@ -217,9 +217,11 @@ class TransformersBackend(BrainPatchBackend):
     def _on_patches_changed(self) -> None:
         self._vector_cache.clear()
 
-    def _delta_for(self, layer: int, token_index: int) -> Any | None:
+    def _delta_for(
+        self, layer: int, token_index: int, is_prompt_pass: bool | None = None
+    ) -> Any | None:
         """Combined delta for one layer, or None when nothing applies."""
-        edits = self.resolve_edits(token_index, layer=layer)
+        edits = self.resolve_edits(token_index, layer=layer, is_prompt_pass=is_prompt_pass)
         if not edits:
             return None
         import torch
@@ -265,7 +267,7 @@ class TransformersBackend(BrainPatchBackend):
             if is_prompt_pass and not self._apply_to_prompt:
                 return output
 
-            delta = self._delta_for(layer_index, token_index)
+            delta = self._delta_for(layer_index, token_index, is_prompt_pass)
             if delta is None:
                 # Untouched: identical to running with no hook at all.
                 return output
