@@ -1151,7 +1151,9 @@ def stage_c_test(batch_size: int = 12) -> dict[str, Any]:
 
 
 @app.function(**gpu_kwargs(timeout=60 * 40, image=RESEARCH_IMAGE))
-def ship_patch(patch_json: str, batch_size: int = 12, n_verify: int = 60) -> dict[str, Any]:
+def ship_patch(
+    patch_json: str, batch_size: int = 12, n_verify: int = 60, verify: bool = True
+) -> dict[str, Any]:
     """Compile the validated direction and re-verify it through the runtime.
 
     The point of this stage is that the *shipped artifact* must reproduce the
@@ -1204,9 +1206,14 @@ def ship_patch(patch_json: str, batch_size: int = 12, n_verify: int = 60) -> dic
         "a configuration this patch carries no test evidence for.\n"
     )
 
+    # Honest status. "verified" is reserved for a COMPLETED artifact-level check.
+    # Driving one prompt at a time through the public API is slow enough that the
+    # check does not always fit the budget; when it is skipped the artifact must
+    # not claim it. The behavioural result is unaffected -- it was measured on
+    # the full test split in stage C.
     compatibility = {
         "transformers": {
-            "status": "verified",
+            "status": "verified" if verify else "implemented",
             "model_revision": REVISION,
             "device": "cuda (NVIDIA L4)",
             "verified_by": "modal run modal_app/antisycophancy_v3.py::ship_patch",
@@ -1259,6 +1266,28 @@ def ship_patch(patch_json: str, batch_size: int = 12, n_verify: int = 60) -> dic
     print(f"[ship] compiled {written} ({size})")
     print(f"[ship] interventions: "
           f"{[(i.layer, i.site, round(i.coefficient, 4)) for i in loaded.manifest.interventions]}")
+
+    if not verify:
+        payload = {
+            "artifact": str(written),
+            "archive_bytes": loaded.archive_bytes,
+            "size_report": size,
+            "frozen_configuration": frozen,
+            "artifact_level_check_run": False,
+            "note": (
+                "Compiled only. The behavioural result was measured on the full "
+                "200-item test split in stage C through the Transformers backend; "
+                "the artifact-level reproduction check did not run, so this patch "
+                "declares transformers as 'implemented' rather than 'verified'."
+            ),
+            "compatibility": compatibility,
+        }
+        _results_path("shipped_patch.json").write_text(
+            json.dumps(payload, indent=1), encoding="utf-8"
+        )
+        volume.commit()
+        print("[ship] compile-only; transformers marked 'implemented', not 'verified'")
+        return {"artifact_bytes": loaded.archive_bytes, "verified": False}
 
     # ---- re-verify the ARTIFACT through the product runtime -----------------
     backend = TransformersBackend()
