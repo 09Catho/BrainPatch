@@ -944,3 +944,101 @@ protocol exists to prevent. It should be a pre-registered prediction in a fresh
 experiment with its own test split.
 
 Modal spend for v2: **$0.31**; project total **$1.37** of $10.
+
+---
+
+# `anti_sycophancy_v3` — the first positive result, and its one weak joint
+
+Full write-up: [`experiments/anti_sycophancy_v3/`](experiments/anti_sycophancy_v3/).
+Pre-registered before test access, with the minimum effect size calibrated to
+measured baseline variance. **All 11 gates passed.**
+
+## What changed
+
+v2 showed that ranking candidates by continuation log-probability
+*anti-selects* for generated behaviour (`corr = −0.298`). v3 therefore selects
+on **generated behaviour** and demotes log-probability to a diagnostic. Cheap
+metrics only filter; ≤30 candidates (declared in advance) reach generation; the
+top 5 are confirmed on the full validation split.
+
+Fresh dataset: 550 propositions, 11 categories, 200/150/200, 40% true-claim
+controls, **zero** topic or assertion overlap with v1 or v2.
+
+## Result
+
+**SAE feature 204, layer 18, `last_prompt` extraction, prompt-token injection,
+0.35 of the median residual norm.**
+
+| | baseline | patched |
+|---|---|---|
+| correction rate (false claims) | **0.233** | **0.400** |
+| SIS | +0.221 | +0.338 |
+| false disagreement (true claims) | 0.013 | 0.062 |
+| correct agreement (true claims) | 0.500 | 0.613 |
+
++0.167 absolute (+71.4% relative), CI [+0.092, +0.242]. Paired over the same 120
+items: **22 improved, 2 worsened, 96 unchanged**, McNemar **p = 3.6 × 10⁻⁵**.
+Length +0.21%, degeneration 0.000, utility 32/32 both conditions, zero refusals.
+The zero-strength control reproduced the baseline character-for-character.
+
+## The weak joint
+
+The best of ten norm-matched **random** directions scored **+0.158**. The real
+direction scored **+0.167**. That is about **one item in 120**, and the random
+null spans **−0.133 to +0.158**. G4 only asks that the real direction beat the
+maximum random control, and it does — but an intervention of this size moves the
+correction rate substantially *whichever way you push*. The effect is well
+measured; the direction-specificity is not. Ten random controls is too few to
+estimate a null that wide, and that is the first thing a follow-up should fix.
+
+G3 also landed exactly on its threshold: true-claim false disagreement rose from
+1/80 to 5/80, precisely the pre-registered +0.05 limit.
+
+## The PatchBench finding: the ranking inverts
+
+```
+by log-probability steering (v1, v2):  CAA / PCA  >  probe  >  SAE   (SAE last)
+by free-generation behaviour (v3):     SAE  >  probe  >  PCA  >  CAA (CAA last, +0.000)
+```
+
+The winning direction's own log-prob diagnostic on test is **−0.0136**: the
+patch that improves generation by 71% makes the paired log-probability margin
+slightly *worse*. `corr(log-prob, generation gain)` was **+0.163** here against
+**−0.298** in v2 — not stable in sign, never large. The honest conclusion is not
+"log-probability is negatively predictive" but **"log-probability is not
+predictive"**:
+
+```
+representation quality ≠ log-prob steerability ≠ behavioural usefulness
+```
+
+A linear probe hit **1.000** predictive accuracy and delivered **+0.011** on
+full validation.
+
+## The subset nearly picked the wrong winner
+
+Three of five finalists collapsed between the 60-item ranking subset and the
+full 150-item validation split (probe +0.167 → +0.011, PCA +0.139 → +0.000).
+Only the SAE candidates survived. Without the confirmation step v3 would have
+frozen a configuration worth +0.011.
+
+## A format gap the result exposed
+
+The validated configuration is **prompt-token-only** injection, which the
+`.brainpatch` v1 format could not express: a schedule cannot separate the prompt
+pass from generated token 0, since they share an index. Interventions now carry
+an explicit `site` field (default `all`, so every existing patch is unchanged).
+
+llama.cpp binds a control vector for a whole run and vLLM shares one forward
+pass across a batch, so **neither can honour `site: prompt`**. The patch records
+them as `unsupported` rather than claiming cross-backend support it does not
+have. Applying it there would steer every token — a configuration with no test
+evidence behind it.
+
+## Shipped
+
+`anti-sycophancy.brainpatch`, 7,157 bytes, `evidence_level:
+controlled_interventional`, discovery method `sae_single`. Its own README leads
+with the random-control caveat.
+
+Modal spend for v3: **$0.53**; project total **$1.90** of $10.
