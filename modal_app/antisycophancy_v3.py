@@ -1368,3 +1368,144 @@ def _generate_via_backend(backend: Any, examples: Any, pad_id: int, batch_size: 
         max_new_tokens=GENERATION_KWARGS["max_new_tokens"], temperature=0.0
     )
     return [backend.generate(e.prompt, config) for e in examples]
+
+
+@app.function(**gpu_kwargs(timeout=60 * 25, image=RESEARCH_IMAGE))
+def verify_shipped_artifact(n_spot: int = 24, batch_size: int = 12) -> dict[str, Any]:
+    """Prove the compiled artifact *is* the intervention that was tested.
+
+    The earlier attempt re-ran the behavioural comparison through
+    ``backend.generate`` one prompt at a time, which was too slow to finish. That
+    was also the weaker check: a 60-item behavioural re-run is noisy, whereas the
+    question "does this file encode the configuration stage C measured?" has an
+    exact answer.
+
+    Three checks, cheapest and strongest first:
+
+    1. **Numerical identity.** The delta the artifact applies is
+       ``coefficient x vector``. Stage C applied ``strength x unit(feature_204)``.
+       If those agree in direction (cosine 1) and magnitude, the artifact encodes
+       the tested intervention exactly -- no sampling, no noise.
+    2. **Site restriction.** ``resolve_edits`` must return an edit on the prompt
+       pass and nothing on a continuation pass, which is what ``site: prompt``
+       claims.
+    3. **Generation identity.** Driving the artifact's vector through the same
+       deterministic path must reproduce the *stored* test generations
+       character-for-character on a spot-check subset.
+    """
+    import torch
+
+    from brainpatch.backends.transformers_backend import TransformersBackend
+    from brainpatch.patch.loader import load_patch
+    from brainpatch.paths import VolumePaths
+    from brainpatch.research.ml.sae import TopKSAE
+
+    paths = VolumePaths(VOL_MOUNT)
+    from pathlib import Path
+
+    artifact = Path(VOL_MOUNT) / "patches" / "compiled" / "anti-sycophancy.brainpatch"
+    loaded = load_patch(artifact)
+    manifest = loaded.manifest
+    intervention = manifest.interventions[0]
+    vector = torch.tensor(loaded.vectors[intervention.vector].data, dtype=torch.float64)
+    applied = float(intervention.coefficient) * vector
+
+    test_blob = json.loads(_results_path("test_results.json").read_text(encoding="utf-8"))
+    expected_strength = float(test_blob["strength"])
+    feature_id = int(test_blob["sae_feature_id"])
+
+    # ---- 1. numerical identity ---------------------------------------------
+    checkpoint = torch.load(
+        str(paths.sae_checkpoint(SAE_EXPERIMENT)), map_location="cpu", weights_only=False
+    )
+    sae = TopKSAE.from_checkpoint(checkpoint, device="cpu")
+    unit = sae.feature_direction(feature_id, normalize=True).to(torch.float64)
+    expected = expected_strength * unit
+
+    cosine = float(
+        (applied @ expected)
+        / (torch.linalg.vector_norm(applied) * torch.linalg.vector_norm(expected))
+    )
+    norm_ratio = float(torch.linalg.vector_norm(applied) / torch.linalg.vector_norm(expected))
+    max_abs_diff = float((applied - expected).abs().max())
+
+    identity_ok = abs(cosine - 1.0) < 1e-6 and abs(norm_ratio - 1.0) < 1e-4
+    print(f"[verify] numerical identity: cosine={cosine:.10f} "
+          f"norm_ratio={norm_ratio:.8f} max_abs_diff={max_abs_diff:.3e} ok={identity_ok}")
+    print(f"[verify] artifact applies |delta|="
+          f"{float(torch.linalg.vector_norm(applied)):.5f}, "
+          f"stage C applied {expected_strength:.5f}")
+
+    # ---- 2. the site restriction is real ------------------------------------
+    backend = TransformersBackend()
+    backend.load_model(MODEL, revision=REVISION, device="cuda")
+    backend.install_patch(loaded)
+    on_prompt = backend.resolve_edits(0, layer=intervention.layer, is_prompt_pass=True)
+    on_continuation = backend.resolve_edits(0, layer=intervention.layer, is_prompt_pass=False)
+    site_ok = len(on_prompt) == 1 and len(on_continuation) == 0
+    print(f"[verify] site restriction: prompt_edits={len(on_prompt)} "
+          f"continuation_edits={len(on_continuation)} ok={site_ok}")
+
+    # ---- 3. reproduces the stored generations -------------------------------
+    splits = _load(("test",))
+    examples = splits["test"]
+    stored = test_blob["responses"]["patched"]
+    picks = _even_subset(examples, n_spot)
+    subset = [examples[i] for i in picks]
+
+    fresh = _generate(
+        backend.model,
+        backend.tokenizer,
+        subset,
+        pad_id=backend.tokenizer.pad_token_id or backend.tokenizer.eos_token_id,
+        vector=vector.to(torch.float32),
+        strength=float(intervention.coefficient) * float(
+            torch.linalg.vector_norm(vector)
+        ),
+        site=intervention.site,
+        layer_module=backend.model.model.layers[intervention.layer],
+        batch_size=batch_size,
+    )
+    matches = sum(1 for i, text in zip(picks, fresh) if text == stored[i])
+    generation_ok = matches == len(picks)
+    print(f"[verify] stored-generation identity: {matches}/{len(picks)} exact matches "
+          f"ok={generation_ok}")
+    if not generation_ok:
+        for i, text in list(zip(picks, fresh))[:2]:
+            if text != stored[i]:
+                print(f"[verify]   item {i} artifact: {text[:110]!r}")
+                print(f"[verify]   item {i} stored  : {stored[i][:110]!r}")
+
+    all_ok = identity_ok and site_ok and generation_ok
+    print(f"[verify] ARTIFACT VERIFIED: {all_ok}")
+
+    payload = {
+        "artifact": str(artifact),
+        "archive_bytes": loaded.archive_bytes,
+        "sae_feature_id": feature_id,
+        "numerical_identity": {
+            "cosine": cosine,
+            "norm_ratio": norm_ratio,
+            "max_abs_diff": max_abs_diff,
+            "artifact_delta_norm": float(torch.linalg.vector_norm(applied)),
+            "stage_c_strength": expected_strength,
+            "ok": identity_ok,
+        },
+        "site_restriction": {
+            "prompt_edits": len(on_prompt),
+            "continuation_edits": len(on_continuation),
+            "ok": site_ok,
+        },
+        "stored_generation_identity": {
+            "n_checked": len(picks),
+            "n_exact_matches": matches,
+            "ok": generation_ok,
+        },
+        "verified": bool(all_ok),
+    }
+    _results_path("artifact_verification.json").write_text(
+        json.dumps(payload, indent=1), encoding="utf-8"
+    )
+    volume.commit()
+    print("[verify] wrote artifact_verification.json")
+    return payload
