@@ -1414,12 +1414,54 @@ def verify_shipped_artifact(n_spot: int = 24, batch_size: int = 12) -> dict[str,
     expected_strength = float(test_blob["strength"])
     feature_id = int(test_blob["sae_feature_id"])
 
-    # ---- 1. numerical identity ---------------------------------------------
+    # ---- 1. numerical identity, against the SIGNED direction ----------------
+    # The first version of this check compared the artifact against the raw
+    # decoder column and passed with cosine 1.0 -- while the artifact was
+    # behaviourally the *sign control*. SAE feature selection in stage B/C
+    # multiplies the column by the sign of the contrast effect, and the v0.1
+    # compiler does not: it carries sign in the coefficient. Comparing against
+    # the unsigned column reproduced exactly the bug it was meant to catch, so
+    # the reference here is recomputed the way stage C actually built it.
+    from brainpatch.research.behaviour_eval import capture_layer_activations, encode_pairs
+
     checkpoint = torch.load(
-        str(paths.sae_checkpoint(SAE_EXPERIMENT)), map_location="cpu", weights_only=False
+        str(paths.sae_checkpoint(SAE_EXPERIMENT)), map_location="cuda", weights_only=False
     )
-    sae = TopKSAE.from_checkpoint(checkpoint, device="cpu")
-    unit = sae.feature_direction(feature_id, normalize=True).to(torch.float64)
+    sae = TopKSAE.from_checkpoint(checkpoint, device="cuda")
+    input_scale = float(sae.config.input_scale)
+
+    backend_probe = TransformersBackend()
+    backend_probe.load_model(MODEL, revision=REVISION, device="cuda")
+    train_pairs = encode_pairs(backend_probe.tokenizer, _load(("train",))["train"])
+    layer = int(manifest.interventions[0].layer)
+    acts = capture_layer_activations(
+        backend_probe.model,
+        {layer: backend_probe.model.model.layers[layer]},
+        train_pairs,
+        pad_id=backend_probe.tokenizer.pad_token_id or backend_probe.tokenizer.eos_token_id,
+        device="cuda",
+        batch_size=batch_size,
+    )
+    position = json.loads(
+        _results_path("frozen_configuration.json").read_text(encoding="utf-8")
+    )["position"]
+    with torch.inference_mode():
+        feat_d, _, _ = sae.encode(acts[layer][f"{position}_desired"].cuda() * input_scale)
+        feat_u, _, _ = sae.encode(acts[layer][f"{position}_undesired"].cuda() * input_scale)
+    pooled = torch.sqrt(
+        (feat_d.var(dim=0, unbiased=False) + feat_u.var(dim=0, unbiased=False)) / 2
+    ).clamp_min(1e-6)
+    effect = (feat_d.mean(dim=0) - feat_u.mean(dim=0)) / pooled
+    required_sign = 1.0 if float(effect[feature_id]) > 0 else -1.0
+    print(f"[verify] contrast effect for feature {feature_id} = "
+          f"{float(effect[feature_id]):+.4f} -> required sign {required_sign:+.0f}")
+
+    del backend_probe
+    torch.cuda.empty_cache()
+
+    unit = (
+        required_sign * sae.feature_direction(feature_id, normalize=True).cpu()
+    ).to(torch.float64)
     expected = expected_strength * unit
 
     cosine = float(
@@ -1497,6 +1539,8 @@ def verify_shipped_artifact(n_spot: int = 24, batch_size: int = 12) -> dict[str,
         "artifact": str(artifact),
         "archive_bytes": loaded.archive_bytes,
         "sae_feature_id": feature_id,
+        "required_sign": required_sign,
+        "contrast_effect": float(effect[feature_id]),
         "numerical_identity": {
             "cosine": cosine,
             "norm_ratio": norm_ratio,
