@@ -84,13 +84,18 @@ subset (+0.167, +0.139) collapsed to +0.011 and +0.000 on full validation.
 
 ## Shipped
 
-`anti-sycophancy.brainpatch` — **7,382 bytes**, `controlled_interventional`,
-one intervention at layer 18 with `site: prompt`.
+`anti-sycophancy.brainpatch` — **7,598 bytes**, `controlled_interventional`,
+one intervention at layer 18, `site: prompt`, coefficient **−12.5621**.
 
-Transformers is marked **`implemented`**, not `verified`: the behaviour was
-measured on that backend in stage C, but the artifact-level reproduction check
-did not complete within budget. llama.cpp and vLLM are **`unsupported`** —
-neither can express prompt-token-only injection, so applying it there would be
-a configuration with no test evidence.
+**The first build of this artifact had the wrong sign** and was behaviourally the
+sign control (0.150 against a 0.233 baseline). The numerical check passed it,
+because it compared against the *unsigned* decoder column. Only regenerating the
+split and comparing behaviour caught it. See §12 of the report; the sign is now
+pinned by `tests/test_patch_sign.py`.
 
-Modal spend for v3: **$0.66**; project total **$2.03** of $10.
+Transformers is **`verified`**: cosine to the tested direction +0.99999998, the
+prompt-only site restriction honoured, and the artifact reproduces the test
+correction rate to within one item (**0.3917** vs 0.4000). llama.cpp and vLLM are
+**`unsupported`** — neither can express prompt-token-only injection.
+
+Modal spend for v3: **$0.71**; project total **$2.08** of $10.

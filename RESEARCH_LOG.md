@@ -1047,3 +1047,31 @@ measured on that backend in stage C, but the artifact-level reproduction check
 the stronger word is reserved for checks that finish.
 
 Modal spend for v3: **$0.66**; project total **$2.03** of $10.
+
+## Postscript: the shipped artifact was wrong, and only the behavioural check saw it
+
+SAE feature selection negates the decoder column when the contrast effect is
+negative. Feature 204's effect is **−0.1003**, so discovery used the negated
+column — but `compile_from_sae` emits the unsigned column and carries sign in
+the coefficient, and the first spec was written **positive**.
+
+The first `anti-sycophancy.brainpatch` was therefore the sign control: correction
+rate **0.150** against a **0.233** baseline, where stage C measured **0.400**.
+
+The first integrity check *passed it*. It compared the compiled vector against
+`feature_direction(204)` — unsigned — and reported `cosine = 1.0`. A check that
+cannot see sign cannot catch a sign error. Regenerating the split and comparing
+behaviour is what exposed it.
+
+Corrected to coefficient **−12.5621**, the artifact verifies: cosine to the
+tested direction **+0.99999998**, ‖δ‖ 22.38996 against 22.39017, prompt-only
+site restriction honoured (1 edit on the prompt pass, 0 on continuation), and a
+correction rate of **0.3917** against stage C's **0.4000** — within one item in
+120. Exact string matches rose from 1/200 to 64/200; the remainder is F16
+storage (~7e-4 perturbation) plus batch-composition non-determinism, neither of
+which is a property of the patch.
+
+`tests/test_patch_sign.py` pins the coefficient sign against the recorded
+`direction_sign` so a spec and an artifact cannot silently disagree again.
+
+Project total after this work: **$2.08** of $10.

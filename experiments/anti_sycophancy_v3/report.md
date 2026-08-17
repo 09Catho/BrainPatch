@@ -206,20 +206,62 @@ modal run modal_app/antisycophancy_v3.py::stage_b_discovery
 modal run modal_app/antisycophancy_v3.py::stage_c_test
 ```
 
-Modal spend for v3: **$0.66** (project total $1.37 → **$2.03** of $10).
+Modal spend for v3: **$0.71** (project total $1.37 → **$2.08** of $10).
 
-## 12. What shipped, and what the artifact does not claim
+## 12. The shipped artifact was wrong, and the behavioural check caught it
 
-`anti-sycophancy.brainpatch`, **7,382 bytes**, `evidence_level:
+Worth recording in full, because the failure mode is general.
+
+SAE feature selection multiplies the decoder column by the sign of the contrast
+effect. Feature 204's effect is **−0.1003**, so discovery used the **negated**
+column. `compile_from_sae` emits the *unsigned* column and carries sign in the
+coefficient — and the first spec was written with a **positive** coefficient.
+
+The first artifact was therefore the **sign control**:
+
+| | correction rate |
+|---|---|
+| baseline | 0.233 |
+| stage C, measured | **0.400** |
+| first artifact (wrong sign) | **0.150** |
+| stage C sign control | 0.158 |
+
+**The first integrity check passed it.** That check compared the compiled vector
+against `feature_direction(204)` — the *unsigned* column — and reported
+`cosine = 1.0`. It reproduced the exact bug it was meant to catch, because a
+check that ignores sign cannot see a sign error. Only regenerating the split and
+comparing *behaviour* exposed it.
+
+After correcting the coefficient to **−12.5621**:
+
+| Check | Result |
+|---|---|
+| cosine to the tested direction | **+0.99999998** (was −0.99999998) |
+| ‖δ‖ applied | 22.38996 vs stage C's 22.39017 |
+| site restriction | 1 edit on the prompt pass, 0 on continuation |
+| **correction rate** | **0.3917** vs stage C's **0.4000** — within one item in 120 |
+| exact string matches | 64/200, up from 1/200 |
+
+Exact string identity is neither required nor achievable: re-batching changes
+left-padding and F16 storage perturbs the vector by ~7×10⁻⁴, and either flips
+argmax on near-ties. The behavioural rate is the meaningful comparison, and it
+agrees.
+
+`tests/test_patch_sign.py` now pins the sign against the recorded
+`direction_sign`, so a spec and an artifact cannot disagree silently again.
+
+## 13. What shipped, and what the artifact does not claim
+
+`anti-sycophancy.brainpatch`, **7,598 bytes**, `evidence_level:
 controlled_interventional`, discovery method `sae_single`, one intervention at
-layer 18 with `site: prompt`. Full provenance is in the manifest, including the
+layer 18 with `site: prompt` and coefficient **−12.5621**. Full provenance is in the manifest, including the
 training-split hash and the strength calibration.
 
 Backend statuses are deliberately conservative:
 
 | Backend | Status | Why |
 |---|---|---|
-| Transformers | `implemented` | the behaviour was measured on this backend in stage C, but the **artifact-level** reproduction check (loading the compiled file and driving it through `backend.generate`) did not complete within budget, so the stronger word is not used |
+| Transformers | `verified` | the compiled delta is numerically the tested direction (cosine +0.99999998), the prompt-only site restriction is honoured, and the artifact reproduces the test correction rate to within one item (0.3917 vs 0.4000) |
 | llama.cpp | `unsupported` | a control vector binds for a whole run; it cannot express `site: prompt` |
 | vLLM | `unsupported` | continuous batching shares one forward pass, so prompt and generated positions cannot be separated |
 | MLX-LM | `experimental` | no Apple Silicon available |
