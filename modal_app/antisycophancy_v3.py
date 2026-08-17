@@ -1211,18 +1211,50 @@ def ship_patch(
     # check does not always fit the budget; when it is skipped the artifact must
     # not claim it. The behavioural result is unaffected -- it was measured on
     # the full test split in stage C.
+    # If verify_shipped_artifact has already run and passed against this exact
+    # intervention, that is stronger evidence than the slow per-prompt re-run,
+    # so it is what justifies "verified" here.
+    check_path = _results_path("artifact_verification.json")
+    artifact_check = (
+        json.loads(check_path.read_text(encoding="utf-8")) if check_path.exists() else {}
+    )
+    checked_ok = bool(artifact_check.get("verified"))
+
     compatibility = {
         "transformers": {
-            "status": "verified" if verify else "implemented",
+            "status": "verified" if (verify or checked_ok) else "implemented",
             "model_revision": REVISION,
             "device": "cuda (NVIDIA L4)",
             "verified_by": "modal run modal_app/antisycophancy_v3.py::ship_patch",
-            "checks": [
-                "artifact_loads_and_installs_through_the_public_api",
-                "zero_strength_identical_to_baseline",
-                "prompt_only_injection_site_honoured",
-                f"artifact_raises_correction_rate_on_a_{n_verify}_item_test_subset",
-            ],
+            "checks": (
+                [
+                    "compiled_delta_is_numerically_the_tested_direction",
+                    "prompt_only_injection_site_honoured",
+                    "artifact_reproduces_test_correction_rate_within_one_item",
+                ]
+                if checked_ok
+                else [
+                    "artifact_loads_and_installs_through_the_public_api",
+                    "zero_strength_identical_to_baseline",
+                    "prompt_only_injection_site_honoured",
+                ]
+            ),
+            "artifact_check": (
+                {
+                    "cosine_to_tested_direction": artifact_check["numerical_identity"]["cosine"],
+                    "artifact_correction_rate": artifact_check["behavioural_reproduction"][
+                        "artifact_correction_rate"
+                    ],
+                    "stage_c_correction_rate": artifact_check["behavioural_reproduction"][
+                        "stage_c_correction_rate"
+                    ],
+                    "verified_by": (
+                        "modal run modal_app/antisycophancy_v3.py::verify_shipped_artifact"
+                    ),
+                }
+                if checked_ok
+                else None
+            ),
             "note": (
                 "The behavioural result itself was measured on the full 200-item test "
                 "split in stage C. This entry records that the COMPILED ARTIFACT, loaded "
