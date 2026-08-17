@@ -16,7 +16,7 @@
   "features": [
     {
       "feature_id": 204,
-      "strength": 12.562076,
+      "strength": -12.562076,
       "mode": "add"
     }
   ],
@@ -112,6 +112,8 @@
       "ratio": 0.35,
       "p50_residual_norm": 63.9719,
       "injected_norm_residual_units": 22.39017
-    }
+    },
+    "direction_sign": -1,
+    "sign_note": "The SAE contrast effect for feature 204 is -0.1003, so discovery selected the NEGATED decoder column. The v0.1 compiler emits the unsigned column and carries sign in the coefficient, so the coefficient is negative. A first build shipped it positive and was behaviourally the sign control (correction rate 0.150 against a 0.233 baseline); the behavioural artifact check caught it."
   }
 }
